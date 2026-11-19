@@ -2,11 +2,11 @@
 
 因为养鱼热封杀在大伙都跑路得差不多之后才用剩饭搭出来的一套能用的 QQ 第三方聊天机器人方案。
 
-本地 AI 接入 QQ 群聊/私聊的机器人。人格「阿灰」——一个嘴损、爱聊猎奇和游戏的狼人兽人，像群友一样聊天，而不是像客服。
+本地 AI 接入 QQ 群聊/私聊的机器人。人格「阿灰」——一个嘴损、爱聊猎奇和游戏的奶牛猫兽人，尝试混入群友
 
 ## 这是什么
 
-- **用真实 QQ 小号登录**（非官方 bot、非协议库），QQNT + NapCat 跑在本机
+- **用真实 QQ 登录**（非官方 bot、非协议库），QQNT + NapCat 跑在本机
 - **本地大模型**（9B）或第三方 DeepSeek 双模式，可热切换
 - 有判官模型决定"该不该接这句话"、长期记忆、读图、发表情包、联网搜索、兽聚倒计时等指令
 - 设计取向：**宁可少说、装死，也不刷屏、不编事实**
@@ -38,13 +38,11 @@ stop-all.ps1           一键停止
 
 | 缺失项 | 原始位置 | 为什么没传 | 如何补齐 |
 |---|---|---|---|
-| 改造版 QQ.exe、dbghelp.dll | `_backup/`、`apps/` | 修改版腾讯客户端，侵权 + 违反用户协议，**公开分发有下架/法律风险** | 自行准备 QQNT 9.9.25 客户端；注入与绕过校验的做法见 `docs/PROJECT.md`，本仓库不提供二进制 |
-| NapCat 二进制与配置 | `apps/NapCat/` | 上游已删库的 fork，授权灰色 | 自行获取 NapCat；WebUI token 等凭证需重新生成 |
-| LiteLoader | `apps/LiteLoader/` | QQNT 加载器，第三方二进制 | 随 QQNT 环境自行安装 |
-| Furry 表情包图片 | `apps/AstrBot/data/plugin_data/meme_manager/packs/furry/memes/` | 二进制素材（约 18MB），非自研 | 自备图片，按 `docs/COMMANDS.md` 的分类名（惊讶/困惑/…）放入对应目录 |
+| NapCat 二进制与配置 | `apps/NapCat/` | 已删库跑路的 fork | 自行获取 NapCat；WebUI token 等凭证需重新生成 |
+| QQNT、改 | `_backup/`、`apps/` | 修改并注入LiteLoader，我不想吃律师函 | 自行准备 QQNT 9.9.25 客户端；注入与绕过校验的做法见 `docs/PROJECT.md` |
+| LiteLoader（改QQNT） | `apps/LiteLoader/` | QQNT反代 | 自行安装 |
 | 记忆 / 缓存数据库 | `data/memory.db`、`data/caption_cache.db`、AstrBot `data_v4.db` | 含真实聊天记忆与会话历史，**隐私数据** | 首次运行会自动新建空库 |
-| 真实凭证 | `apps/NapCat/config/webui.json`（token/totp）、`data/cmd_config.json` 的 api_key 与面板密码哈希 | 泄露风险 | 配置文件中已脱敏为 `CHANGE_ME`，填入你自己的值；`webui.json` 需重新生成 |
-| 登录二维码 / 凭证临时文件 | `登录二维码.html`、`login-qr*.png`、`_tmp_*` | 时效性登录凭证 | 启动时扫码重新生成 |
+| 真实凭证 | `apps/NapCat/config/webui.json`（token/totp）、`data/cmd_config.json` 的 api_key 与面板密码哈希 | 不想给别人用自己的token | 配置文件中已脱敏为 `CHANGE_ME`，填入你自己的值；`webui.json` 需重新生成 |
 
 ### B. 刻意不上传：可重建的体积项（有替代方案）
 
@@ -52,17 +50,15 @@ stop-all.ps1           一键停止
 |---|---|---|---|
 | Python 虚拟环境 | `apps/AstrBot/.venv/` | ~419MB | 用 `requirements.txt` / `pyproject.toml` 重新 `pip install` |
 | Node 依赖 | `apps/NapCat/node_modules/` | ~113MB | `pnpm install` |
-| 运行时缓存 | `runtime/` | ~603MB | 首次启动自动生成 |
 | 前端构建产物 | `apps/AstrBot/data/dist/` | — | 从 AstrBot 发行版获取或重新构建 |
-| 备份归档 | `_backup/` | ~4MB | 历史备份，与运行无关 |
 | 模型服务 | 独立目录 `D:\LLM`（不在本项目内） | — | 本项目只**调用**不修改它；模型服务（9B / 判官 1.7B / OCR / 本地VL / 向量）需单独部署，端口见 `docs/PROJECT.md` |
 
-**完整可运行的快照**仅保存在原作者的本机 `D:\QQNTBOT`（含全部依赖与二进制），不在 GitHub。本仓库的目标是"能读懂、能重建逻辑"，不是开箱即用。
+**完整可运行的快照**仅保存在原作者的本机，本仓库只提供思路喵，不是开箱即用。
 
 ### C. 版本对应关系（避免版本错配）
 
-- QQNT 客户端：**9.9.25**（版本锁死，升级会导致注入失效；hosts 已屏蔽更新域名）
-- AstrBot：**4.29.4**，基于上游 AGPL-3.0，含本项目 6 处源码补丁（见 `docs/PROJECT.md` §14，`scripts/verify.ps1` 可核对补丁是否存活）
+- QQNT 客户端：**9.9.25**（升级会导致注入失效；建议hosts屏蔽更新域名）
+- AstrBot（建议版本）：**4.29.4**，基于上游 AGPL-3.0，含本项目 6 处源码补丁（见 `docs/PROJECT.md` §14，`scripts/verify.ps1` 可核对补丁是否存活）
 
 ## 接手指引
 
@@ -75,19 +71,10 @@ stop-all.ps1           一键停止
 
 > 完整步骤见 [部署指引 docs/DEPLOY.md](docs/DEPLOY.md)，下面只是速记。
 
-- 主模型、判官、向量、OCR/VL 等模型服务在另一目录 `D:\LLM`，本仓库只调用不改它
+- （本地9B）主模型、判官、向量、OCR/VL 等模型服务在另一目录 `D:\LLM`，本仓库只调用不改它
 - `data/cmd_config.json` 里的 `CHANGE_ME` 需替换为真实值
-- AstrBot 升级会覆盖本项目的 6 处源码补丁，升级后务必跑 `verify.ps1`
+- AstrBot 升级会覆盖本项目的 6 处源码补丁，升级后务必跑 `verify.ps1`恢复，不建议更新
 
 ## 许可证
 
 本仓库采用 **AGPL-3.0-or-later**（见 [LICENSE](LICENSE)），与所依赖的 AstrBot 上游一致。
-
-需要明确 AGPL 的实际含义（常被误解）：
-
-- ✅ 允许任何人**查看、修改、非商用使用**源码
-- ⚠️ **允许商用** —— "开源"的定义本身就要求允许商用，AGPL 也不例外
-- ⚠️ 若修改了源码并**通过网络对外提供服务**，必须向用户公开你的修改源码（这是 AGPL 相对 GPL 多出的"网络条款"）
-- ❌ 如果你真正的诉求是"别人不能拿去商用"，AGPL **做不到** —— 那需要 source-available 类协议（如 CC BY-NC-SA），但那与仓库内 AGPL 的 AstrBot 源码冲突，无法对整个仓库生效
-
-本项目原作者的选择是 AGPL-3.0：优先保证与上游许可证一致、避免法律冲突，而非禁止商用。
