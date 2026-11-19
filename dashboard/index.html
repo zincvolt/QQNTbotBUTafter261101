@@ -1,0 +1,1146 @@
+<!doctype html>
+<html lang="zh">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>QQNT Bot 控制台</title>
+<style>
+  :root {
+    --bg:#0f1115; --panel:#171a21; --line:#242a35; --text:#e6e9ef;
+    --dim:#8b93a3; --ok:#3ecf8e; --bad:#e5534b; --warn:#e3b341; --accent:#7c9cff;
+  }
+  * { box-sizing:border-box; }
+  body {
+    margin:0; background:var(--bg); color:var(--text); font:14px/1.6 system-ui,"Microsoft YaHei",sans-serif;
+    padding:24px; max-width:1180px; margin-inline:auto;
+  }
+  header { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:20px; }
+  h1 { font-size:19px; margin:0; font-weight:650; letter-spacing:.3px; }
+  .spacer { flex:1; }
+  button {
+    background:var(--panel); color:var(--text); border:1px solid var(--line);
+    border-radius:9px; padding:8px 14px; cursor:pointer; font-size:13px;
+  }
+  button:hover { border-color:var(--accent); }
+  button.primary { border-color:#2f5d46; color:var(--ok); }
+  button.danger { border-color:#5c2f2f; color:var(--bad); }
+  button.tab { padding:6px 12px; font-size:12.5px; color:var(--dim); }
+  button.tab.active { color:var(--text); border-color:var(--accent); }
+  .pills { display:flex; gap:10px; flex-wrap:wrap; margin-bottom:18px; }
+  .pill {
+    display:flex; align-items:center; gap:8px; background:var(--panel);
+    border:1px solid var(--line); border-radius:999px; padding:7px 14px; font-size:13px;
+  }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--bad); }
+  .dot.on { background:var(--ok); box-shadow:0 0 8px rgba(62,207,142,.6); }
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  @media (max-width:820px) { .grid { grid-template-columns:1fr; } }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:14px; padding:16px 18px; }
+  .panel h2 { font-size:13px; font-weight:600; color:var(--dim); margin:0 0 12px; letter-spacing:.5px; }
+  .stat { display:flex; gap:26px; margin-bottom:16px; }
+  .stat div { font-size:13px; color:var(--dim); }
+  .stat b { display:block; font-size:24px; color:var(--text); font-weight:600; }
+  ul { list-style:none; margin:0; padding:0; }
+  li { padding:9px 0; border-bottom:1px solid var(--line); font-size:13px; }
+  li:last-child { border-bottom:0; }
+  .meta { color:var(--dim); font-size:11.5px; margin-right:6px; }
+  .bot { color:var(--accent); }
+  .empty { color:var(--dim); font-size:13px; padding:8px 0; }
+  #msg { color:var(--warn); font-size:12.5px; min-height:18px; }
+
+  .wide { grid-column:1 / -1; }
+  .bars { display:grid; grid-template-columns:repeat(3,1fr); gap:18px; margin-bottom:14px; }
+  @media (max-width:820px) { .bars { grid-template-columns:1fr; } .two { grid-template-columns:1fr !important; } }
+  .bar-label { display:flex; justify-content:space-between; font-size:12.5px; color:var(--dim); margin-bottom:6px; }
+  .bar { height:8px; background:#11141a; border-radius:999px; overflow:hidden; border:1px solid var(--line); }
+  .bar > i { display:block; height:100%; background:linear-gradient(90deg,#3ecf8e,#7c9cff); }
+  .bar.warn > i { background:linear-gradient(90deg,#e3b341,#e5534b); }
+  .procs { display:grid; grid-template-columns:1fr auto auto; gap:6px 14px; font-size:12.5px; }
+  .procs span:nth-child(3n) { color:var(--dim); text-align:right; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
+  label { display:block; font-size:12.5px; color:var(--dim); margin-bottom:6px; }
+  textarea, input[type=text] {
+    width:100%; background:#11141a; color:var(--text);
+    border:1px solid var(--line); border-radius:9px; padding:10px 12px;
+    font:12.5px/1.7 ui-monospace,Consolas,monospace;
+  }
+  textarea { resize:vertical; min-height:78px; }
+  textarea:focus, input:focus { outline:none; border-color:var(--accent); }
+  .chips { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+  .chip {
+    background:#11141a; border:1px solid var(--line); border-radius:999px;
+    padding:4px 11px; font-size:12px; color:var(--dim); cursor:pointer;
+  }
+  .chip:hover { border-color:var(--accent); color:var(--text); }
+  .hint { color:var(--dim); font-size:12px; margin-top:8px; }
+  pre.log {
+    margin:0; background:#0c0e12; border:1px solid var(--line); border-radius:10px;
+    padding:12px 14px; height:300px; overflow:auto;
+    font:12px/1.55 ui-monospace,Consolas,monospace; color:#c8ceda; white-space:pre-wrap;
+  }
+  .logbar { display:flex; gap:8px; margin-bottom:10px; flex-wrap:wrap; align-items:center; }
+  .vbox { background:#0c0e12; border:1px solid var(--line); border-radius:9px; padding:10px 12px; font-size:12.5px; }
+  .v-yes { color:var(--ok); } .v-no { color:var(--bad); }
+  .plist { display:grid; gap:10px; }
+  .pitem { border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
+  .pitem b { font-size:13px; }
+  .pitem .meta { display:block; margin-top:2px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>QQNT Bot 控制台</h1>
+  <span id="msg"></span>
+  <div class="spacer"></div>
+  <button class="primary" onclick="act('start')">启动全部</button>
+  <button class="danger" onclick="act('stop')">停止全部</button>
+  <button onclick="refresh()">刷新</button>
+</header>
+
+<div class="pills" id="pills"></div>
+
+<div class="stat">
+  <div>长期记忆<b id="mem">–</b></div>
+  <div>群最后动静<b id="idle">–</b></div>
+</div>
+
+<div class="grid">
+  <div class="panel wide">
+    <h2>系统状态</h2>
+    <div class="bars">
+      <div>
+        <div class="bar-label"><span>CPU</span><span id="cpuTxt">–</span></div>
+        <div class="bar" id="cpuBar"><i style="width:0%"></i></div>
+      </div>
+      <div>
+        <div class="bar-label"><span>内存</span><span id="ramTxt">–</span></div>
+        <div class="bar" id="ramBar"><i style="width:0%"></i></div>
+      </div>
+      <div>
+        <div class="bar-label"><span>D 盘</span><span id="diskTxt">–</span></div>
+        <div class="bar" id="diskBar"><i style="width:0%"></i></div>
+      </div>
+    </div>
+    <div class="procs" id="procs"></div>
+  </div>
+
+  <div class="panel wide">
+    <h2>手动加记忆</h2>
+    <div class="hint">勾选最近群聊里的消息，直接存成长期记忆（会走向量去重）</div>
+    <div id="ltmList" style="max-height:280px;overflow:auto;margin-top:8px"><span class="hint">加载中…</span></div>
+    <div style="margin-top:10px">
+      <button class="primary" onclick="addSelectedMemories()">加入记忆</button>
+      <span class="hint" id="ltmMsg"></span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>最近记住的事 <button style="float:right;padding:3px 9px;font-size:11.5px" onclick="clearAllMemories()">清空全部</button></h2>
+    <ul id="memlist"><li class="empty">加载中…</li></ul>
+  </div>
+  <div class="panel">
+    <h2>最近对话</h2>
+    <ul id="chatlist"><li class="empty">加载中…</li></ul>
+  </div>
+
+  <div class="panel wide">
+    <h2>触发权限</h2>
+    <div class="two">
+      <div>
+        <label>可用群（每行一个群号，只有这些群会响应）</label>
+        <textarea id="groups" placeholder="1128093050"></textarea>
+        <div class="chips" id="known"></div>
+        <div class="hint">点下面的群号可直接加进去 · 留空 = 所有群都不响应</div>
+      </div>
+      <div>
+        <label>可用私聊账号（每行一个 QQ 号）</label>
+        <textarea id="friends" placeholder="1154487120"></textarea>
+        <div class="hint">不在名单里的私聊会被回一句"未授权"并丢弃</div>
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <button class="primary" onclick="saveAccess()">保存并重启 AstrBot</button>
+      <span class="hint" id="accessMsg"></span>
+    </div>
+
+    <div style="margin-top:18px; border-top:1px solid var(--line); padding-top:14px">
+      <label>冷场水群开关（按群，白名单外的群默认关闭）</label>
+      <div class="plist" id="waterList"><span class="hint">加载中…</span></div>
+      <div style="margin-top:10px">
+        <button onclick="saveWater()">保存水群设置</button>
+        <span class="hint" id="waterMsg"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel wide">
+    <h2>本地优化 / 第三方精简（一键切换）</h2>
+    <div class="hint" id="profileMode">加载中…</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+      <button class="primary" onclick="applyProfile('local')">套用本地优化</button>
+      <button class="primary" onclick="applyProfile('third')">套用第三方精简</button>
+      <span class="hint" id="profileMsg"></span>
+    </div>
+    <div style="display:grid;gap:10px;margin-top:16px">
+      <label style="display:flex;align-items:center;gap:10px;color:var(--text)">
+        <input type="checkbox" id="profMeme" onchange="toggleProfile('meme')">
+        附带表情（本地模型自己不会调工具，靠概率挂图）
+        <span class="meta" id="profMemeMeta"></span>
+      </label>
+      <label style="display:flex;align-items:center;gap:10px;color:var(--text)">
+        <input type="checkbox" id="profRules" onchange="toggleProfile('rules')">
+        正则文本替换（句号换波浪号等；第三方也能靠提示词守规则）
+        <span class="meta" id="profRulesMeta"></span>
+      </label>
+    </div>
+    <div class="hint" style="margin-top:10px">
+      第三方模型能自己调用 send_meme 工具、也能理解“别每句都用句号”这类提示词，
+      所以切到 API 后建议关掉这两项，省 token 也更自然。
+    </div>
+  </div>
+
+  <div class="panel wide">
+    <h2>记忆提取提示词（写入 data\ltm_prompt.txt）</h2>
+    <label>必须保留 {user} 和 {bot} 两个占位符</label>
+    <textarea id="ltmPrompt" rows="12" style="width:100%;background:#11141a;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:10px;font-family:monospace;font-size:12.5px" placeholder="加载中…"></textarea>
+    <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="primary" onclick="saveLtmPrompt()">保存提示词</button>
+      <button onclick="loadLtmPrompt()">重新载入</button>
+      <span class="hint" id="ltmPromptMsg"></span>
+    </div>
+    <div class="hint">记忆质量基本由这段提示词决定；觉得记了莫名其妙的东西，就把“不收”那几条写狠一点</div>
+  </div>
+
+  <div class="panel wide">
+    <h2>审查 · 额度 · 省 token（第三方模式生效）</h2>
+    <div class="hint" id="guardMode">加载中…</div>
+    <div class="two" style="margin-top:12px">
+      <div>
+        <label>本群审查开关</label>
+        <div class="plist" id="reviewList"><span class="hint">加载中…</span></div>
+        <div class="hint">命中 data\review_words.txt 里的词就把整条回复替换掉；只有第三方模式生效</div>
+      </div>
+      <div>
+        <label>每日额度（tokens，0 = 不限）</label>
+        <input id="quotaBox" type="number" min="0" step="10000" placeholder="200000"
+          style="width:100%;background:#11141a;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px">
+        <div class="hint" id="quotaUsed">今日已用 –</div>
+
+        <label style="margin-top:16px;display:flex;align-items:center;gap:10px;color:var(--text)">
+          <input type="checkbox" id="saveTokenBox">
+          省 token 模式（关闭后历史按完整上下文发送）
+        </label>
+
+        <div style="margin-top:14px">
+          <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+            <span>历史消息数量 <span class="meta">省 token 时只发最近 N 条</span></span>
+            <b id="histKeepVal">–</b>
+          </div>
+          <input id="histKeep" type="range" min="2" max="40" step="1" style="width:100%"
+            oninput="document.getElementById('histKeepVal').textContent=this.value+' 条'">
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <button class="primary" onclick="saveGuardConfig()">保存</button>
+      <span class="hint" id="guardMsg"></span>
+    </div>
+  </div>
+
+  <div class="panel wide">
+    <h2>人格（写入 data\persona.json，保存后自动重启 AstrBot）</h2>
+    <textarea id="persona" rows="14" placeholder="加载中…"></textarea>
+    <div style="margin-top:12px">
+      <button class="primary" onclick="savePersona()">保存人格</button>
+      <span class="hint" id="personaMsg"></span>
+    </div>
+  </div>
+
+  <div class="panel wide">
+    <h2>判官（决定群里要不要接话）</h2>
+    <label>判定提示词 · 必须保留 {message} 占位符，{recent} 可选</label>
+    <textarea id="judgePrompt" rows="10" placeholder="加载中…"></textarea>
+    <div class="two" style="margin-top:12px">
+      <div>
+        <label>必答关键词（命中就直接回，每行一个）</label>
+        <textarea id="judgeForce" rows="4" placeholder="bot"></textarea>
+      </div>
+      <div>
+        <label>免打扰关键词（命中就假装没看见，每行一个）</label>
+        <textarea id="judgeIgnore" rows="4" placeholder="刷屏"></textarea>
+      </div>
+    </div>
+    <div style="margin-top:12px">
+      <button class="primary" onclick="saveJudge()">保存判官（无需重启）</button>
+      <span class="hint" id="judgeMsg"></span>
+    </div>
+
+    <div style="margin-top:16px; border-top:1px solid var(--line); padding-top:14px">
+      <label>试判：输入一条群消息，看它会接还是不理</label>
+      <div class="two">
+        <div>
+          <input type="text" id="testMsg" placeholder="今天好累啊">
+          <div class="hint">新消息</div>
+        </div>
+        <div>
+          <input type="text" id="testRecent" placeholder="A：在吗  B：刚下班">
+          <div class="hint">最近的聊天上下文（可留空）</div>
+        </div>
+      </div>
+      <div style="margin-top:10px">
+        <button onclick="testJudge()">试一下</button>
+        <span class="hint" id="testResult"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel wide">
+    <h2>判官与思维链</h2>
+    <div style="display:grid;gap:14px;margin-top:6px">
+      <label style="display:flex;align-items:center;gap:10px;color:var(--text)">
+        <input type="checkbox" id="dualJudgeBox">
+        双判官（1.5B 判完再由 9B 复核，两次都同意才回）
+      </label>
+      <div class="hint">开启后每次"疑似要回"会多花约 1.2~1.6 秒；9B 只在 1.5B 判 1 时才被调用</div>
+      <label style="display:flex;align-items:center;gap:10px;color:var(--text)">
+        <input type="checkbox" id="thinkBox">
+        开启模型思考链（会慢很多，群聊不建议）
+      </label>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span>思考预算 <span class="meta">本地=总输出上限；第三方=换算成 reasoning_effort(low/high/max)</span></span>
+          <b id="thinkBudgetVal">–</b>
+        </div>
+        <input id="thinkBudget" type="range" min="200" max="3000" step="100" style="width:100%" oninput="document.getElementById('thinkBudgetVal').textContent=this.value+' tok'">
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="primary" onclick="applyThinking()">保存（重启 AstrBot）</button>
+        <span class="hint" id="thinkMsg"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel wide">
+    <h2>回复行为（保存即生效，无需重启）</h2>
+    <div style="display:grid;gap:16px;margin-top:6px">
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span>主动回复概率 <span class="meta">判官说接之后，再按这个概率抽一次</span></span>
+          <b id="replyVal">–</b>
+        </div>
+        <input id="replySlider" type="range" min="0" max="1" step="0.05" style="width:100%" oninput="document.getElementById('replyVal').textContent=Math.round(this.value*100)+'%'">
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span>每群回复预算 <span class="meta">10 分钟内最多回几条（@ 和喊名字也算在内）</span></span>
+          <b id="budgetVal">–</b>
+        </div>
+        <input id="budgetSlider" type="range" min="1" max="30" step="1" style="width:100%" oninput="document.getElementById('budgetVal').textContent=this.value+' 条'">
+      </div>
+      <div>
+        <label>召唤词（逗号分隔，命中就直接回，不看概率闸）</label>
+        <input id="summonBox" type="text" placeholder="阿灰, 小灰, 灰狼"
+          style="width:100%;background:#11141a;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px">
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span>群上下文时间窗 <span class="meta">只把最近 N 分钟的群聊喂给模型</span></span>
+          <b id="histVal">–</b>
+        </div>
+        <input id="histSlider" type="range" min="5" max="120" step="5" style="width:100%" oninput="document.getElementById('histVal').textContent=this.value+' 分钟'">
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span>附带表情概率 <span class="meta">正常回复时随机挂一张表情</span></span>
+          <b id="memeVal">–</b>
+        </div>
+        <input id="memeSlider" type="range" min="0" max="1" step="0.05" style="width:100%" oninput="document.getElementById('memeVal').textContent=Math.round(this.value*100)+'%'">
+      </div>
+      <div>
+        <label>文本替换（每行一条，格式：正则 => 替换成）</label>
+        <textarea id="rulesBox" rows="4" style="width:100%;background:#11141a;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:10px;font-family:monospace;font-size:13px"></textarea>
+        <div class="hint">例：<code>。(?=\s|$) =&gt; ~</code> 只替换句末句号；<code>。 =&gt; ~</code> 替换所有句号</div>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="primary" onclick="applyReply()">保存</button>
+        <span class="hint" id="replyMsg"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel wide">
+    <h2>模型采样参数（保存后自动重启 AstrBot，约 10 秒）</h2>
+    <div style="display:grid;gap:16px;margin-top:6px">
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span>温度 <span class="meta">越低越守设定，越高越发散</span></span>
+          <b id="tempVal">–</b>
+        </div>
+        <input id="tempSlider" type="range" min="0.1" max="1.5" step="0.05" value="0.55" style="width:100%" oninput="document.getElementById('tempVal').textContent=this.value">
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span>重复惩罚 <span class="meta">压口癖和复读，1.0 为关闭</span></span>
+          <b id="rpVal">–</b>
+        </div>
+        <input id="rpSlider" type="range" min="1.0" max="1.5" step="0.01" value="1.0" style="width:100%" oninput="document.getElementById('rpVal').textContent=this.value">
+      </div>
+      <div>
+        <div style="display:flex;justify-content:space-between;margin-bottom:6px">
+          <span>单条上限 <span class="meta">token 数；第三方模式可拖到 2000</span></span>
+          <b id="mtVal">–</b>
+        </div>
+        <input id="mtSlider" type="range" min="40" max="200" step="10" value="80" style="width:100%" oninput="document.getElementById('mtVal').textContent=this.value">
+      </div>
+      <div style="display:flex;gap:10px;align-items:center">
+        <button class="primary" onclick="applySampling()">应用</button>
+        <span class="hint" id="sampMsg"></span>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel wide">
+    <h2>对话上下文 <button style="float:right;padding:3px 9px;font-size:11.5px" onclick="clearAllContexts()">全部清空</button></h2>
+    <div id="ctxList" class="hint">加载中…</div>
+    <div class="hint">人格改了但回复还怪，多半是旧对话在带节奏；清空后下一条消息会开新对话</div>
+  </div>
+
+  <div class="panel wide">
+    <h2>自动接话开关（按群，关掉后只有 @ 才回）</h2>
+    <div class="plist" id="autoList"><span class="hint">加载中…</span></div>
+    <div style="margin-top:10px">
+      <button onclick="saveAutoReply()">保存自动接话设置</button>
+      <span class="hint" id="autoMsg"></span>
+    </div>
+  </div>
+
+  <div class="panel wide">
+    <h2>主模型（切换后自动重启 AstrBot，约 10 秒）</h2>
+    <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+      <select id="modelSel" style="flex:1;min-width:260px;background:#11141a;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px">
+      </select>
+      <button class="primary" onclick="applyModel()">切换</button>
+      <span class="hint" id="modelMsg"></span>
+    </div>
+    <div class="hint">预设来自 D:\LLM\scripts\models.ini，只改聊天用的那一个，不动路由配置</div>
+  </div>
+
+  <div class="panel wide">
+    <h2>识图（本地 VL / 第三方 / 关闭）</h2>
+    <div class="hint" id="vmState">加载中…</div>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+      <button id="vmLocal" onclick="setVisionMode('local')">本地 VL 读图</button>
+      <button id="vmApi" onclick="setVisionMode('third_party')">交给第三方看图</button>
+      <button id="vmOff" onclick="setVisionMode('off')">关闭读图</button>
+    </div>
+    <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button onclick="vlControl('start')">启动本地 VL</button>
+      <button onclick="vlControl('stop')">停止本地 VL</button>
+      <span class="hint" id="vmMsg"></span>
+    </div>
+    <div class="hint" style="margin-top:10px">
+      本地 VL 在第三方模式下会把图转成文字再发出去（不耗 token）；关闭读图则图片直接忽略。
+      切到第三方 API 时，聊天/OCR/识图三个本地模型会被自动卸载。
+    </div>
+  </div>
+
+  <div class="panel wide">
+    <h2>图片理解（OCR + 哈希缓存 + 群图上下文）</h2>
+    <div class="two">
+      <div>
+        <div class="stat" style="margin-bottom:8px">
+          <div>缓存条目<b id="capEntries">–</b></div>
+          <div>命中次数<b id="capHits">–</b></div>
+          <div>表情包图库<b id="memeImages">–</b></div>
+        </div>
+        <div class="hint">同一张图（按内容哈希）只识别一次，之后直接返回缓存，不再消耗算力</div>
+      </div>
+      <div>
+        <label>最近识别过的图</label>
+        <ul id="capList"><li class="empty">加载中…</li></ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel wide">
+    <h2>已装模块</h2>
+    <div class="plist" id="plist"><span class="hint">加载中…</span></div>
+    <div class="hint">模块开发说明见 <code>docs\MODULE-GUIDE.md</code></div>
+  </div>
+
+  <div class="panel wide">
+    <h2>运行日志</h2>
+    <div class="logbar">
+      <button class="tab active" data-src="astrbot" onclick="pickLog(this)">AstrBot</button>
+      <button class="tab" data-src="napcat" onclick="pickLog(this)">NapCat</button>
+      <button class="tab" data-src="router" onclick="pickLog(this)">模型路由</button>
+      <span class="hint" id="logHint"></span>
+    </div>
+    <pre class="log" id="logBox">加载中…</pre>
+  </div>
+</div>
+
+<script>
+const esc = s => (s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
+let logSrc = 'astrbot';
+
+function setBar(id, pct, warnAbove) {
+  const bar = document.getElementById(id);
+  bar.querySelector('i').style.width = Math.min(100, pct) + '%';
+  bar.classList.toggle('warn', pct >= warnAbove);
+}
+
+async function refresh() {
+  try {
+    const st = await (await fetch('/api/status')).json();
+    document.getElementById('pills').innerHTML = st.components.map(c =>
+      `<div class="pill"><span class="dot ${c.up ? 'on' : ''}"></span>${c.label}<span style="color:#8b93a3">:${c.port}</span></div>`
+    ).join('');
+    document.getElementById('mem').textContent = st.memories;
+    document.getElementById('idle').textContent =
+      st.activity.idle_min === null ? '–' : st.activity.idle_min + ' 分钟前';
+
+    const sys = await (await fetch('/api/system')).json();
+    document.getElementById('cpuTxt').textContent = sys.cpu + '%';
+    setBar('cpuBar', sys.cpu, 85);
+    document.getElementById('ramTxt').textContent = sys.mem_used_gb + ' / ' + sys.mem_total_gb + ' GB';
+    setBar('ramBar', sys.mem_percent, 85);
+    const diskPct = (sys.disk_total_gb - sys.disk_free_gb) / sys.disk_total_gb * 100;
+    document.getElementById('diskTxt').textContent = sys.disk_free_gb + ' GB 空闲';
+    setBar('diskBar', diskPct, 90);
+    document.getElementById('procs').innerHTML = sys.procs.map(p =>
+      `<span>${esc(p.label)}</span><span>${p.rss_mb} MB</span><span>${p.uptime_min} 分钟</span>`
+    ).join('') || '<span class="hint">没有相关进程</span>';
+
+    const mem = await (await fetch('/api/memories?t=' + Date.now())).json();
+    document.getElementById('memlist').innerHTML = mem.items.length
+      ? mem.items.map(m => `<li style="display:flex;gap:8px;align-items:flex-start">
+          <span style="flex:1"><span class="meta">${esc(m.at)} · QQ ${esc(m.uid)}</span>${esc(m.text)}</span>
+          <button style="padding:2px 8px;font-size:11px;flex:none" onclick="delMemory(${m.id})">删</button>
+        </li>`).join('')
+      : '<li class="empty">还没有记忆</li>';
+
+    const chats = await (await fetch('/api/chats')).json();
+    document.getElementById('chatlist').innerHTML = chats.items.length
+      ? chats.items.map(c => `<li>
+          <span class="meta">${esc(c.at)} · ${c.scope}</span><br>
+          <span style="color:#8b93a3">你：</span>${esc(c.user)}<br>
+          <span class="bot">它：</span>${esc(c.bot)}
+        </li>`).join('')
+      : '<li class="empty">还没有对话</li>';
+
+    await refreshLog();
+  } catch (e) {
+    document.getElementById('msg').textContent = '后台服务没起来（6190）';
+  }
+}
+
+async function refreshLog() {
+  try {
+    const r = await (await fetch('/api/logs?src=' + logSrc + '&lines=120')).json();
+    const box = document.getElementById('logBox');
+    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+    box.textContent = r.lines.join('\n');
+    if (atBottom) box.scrollTop = box.scrollHeight;
+    document.getElementById('logHint').textContent = new Date().toLocaleTimeString();
+  } catch (e) {}
+}
+
+function pickLog(btn) {
+  document.querySelectorAll('button.tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  logSrc = btn.dataset.src;
+  refreshLog();
+}
+
+async function loadAccess() {
+  try {
+    const a = await (await fetch('/api/access')).json();
+    document.getElementById('groups').value = a.groups.join('\n');
+    document.getElementById('friends').value = a.friends.join('\n');
+    document.getElementById('known').innerHTML = (a.known || []).map(g =>
+      `<span class="chip" onclick="addGroup('${g.id}')">${g.id} · ${g.count}条 · ${esc(g.last)}</span>`
+    ).join('') || '<span class="hint">还没见过任何群消息</span>';
+  } catch (e) {}
+}
+
+function addGroup(id) {
+  const box = document.getElementById('groups');
+  const list = box.value.split('\n').map(s => s.trim()).filter(Boolean);
+  if (!list.includes(id)) list.push(id);
+  box.value = list.join('\n');
+}
+
+async function saveAccess() {
+  const groups = document.getElementById('groups').value.split('\n').map(s => s.trim()).filter(Boolean);
+  const friends = document.getElementById('friends').value.split('\n').map(s => s.trim()).filter(Boolean);
+  document.getElementById('accessMsg').textContent = '保存中…';
+  const r = await (await fetch('/api/access', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({groups, friends})
+  })).json();
+  document.getElementById('accessMsg').textContent = r.msg || '已保存';
+  setTimeout(refresh, 6000);
+}
+
+async function loadWater() {
+  const r = await (await fetch('/api/water')).json();
+  document.getElementById('waterList').innerHTML = r.items.map(w => `
+    <div class="pitem" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <label style="margin:0;display:flex;align-items:center;gap:8px;color:var(--text)">
+        <input type="checkbox" data-gid="${w.id}" ${w.enabled ? 'checked' : ''}>
+        ${w.id}${w.whitelisted ? '' : ' <span class="meta">未在白名单</span>'}
+      </label>
+      <span class="meta">${w.count} 条 · ${esc(w.last || '—')}</span>
+      <span style="margin-left:auto;font-size:12.5px;color:#8b93a3">冷场
+        <input type="number" min="5" step="5" style="width:76px" data-idle="${w.id}" value="${w.idle_min}"> 分钟后冒泡
+      </span>
+    </div>`).join('') || '<span class="hint">还没有可用群</span>';
+}
+
+async function saveWater() {
+  const items = [...document.querySelectorAll('#waterList input[type=checkbox]')].map(cb => {
+    const idle = document.querySelector(`#waterList input[data-idle="${cb.dataset.gid}"]`);
+    return { id: cb.dataset.gid, enabled: cb.checked, idle_min: Number(idle && idle.value) || 90 };
+  });
+  document.getElementById('waterMsg').textContent = '保存中…';
+  const r = await (await fetch('/api/water', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({items})
+  })).json();
+  document.getElementById('waterMsg').textContent = r.msg || '已保存';
+}
+
+async function loadPersona() {
+  const r = await (await fetch('/api/persona')).json();
+  document.getElementById('persona').value = r.text || '';
+}
+
+async function savePersona() {
+  const text = document.getElementById('persona').value;
+  document.getElementById('personaMsg').textContent = '保存中…';
+  const r = await (await fetch('/api/persona', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({text})
+  })).json();
+  document.getElementById('personaMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+}
+
+async function loadJudge() {
+  const j = await (await fetch('/api/judge')).json();
+  document.getElementById('judgePrompt').value = j.prompt || '';
+  document.getElementById('judgeForce').value = (j.force_reply || []).join('\n');
+  document.getElementById('judgeIgnore').value = (j.ignore || []).join('\n');
+}
+
+function lines(id) {
+  return document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
+}
+
+async function saveJudge() {
+  document.getElementById('judgeMsg').textContent = '保存中…';
+  const r = await (await fetch('/api/judge', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      prompt: document.getElementById('judgePrompt').value,
+      force_reply: lines('judgeForce'),
+      ignore: lines('judgeIgnore')
+    })
+  })).json();
+  document.getElementById('judgeMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+}
+
+async function testJudge() {
+  const box = document.getElementById('testResult');
+  box.textContent = '判定中…';
+  const r = await (await fetch('/api/judge/test', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      message: document.getElementById('testMsg').value,
+      recent: document.getElementById('testRecent').value
+    })
+  })).json();
+  if (r.ok === false) { box.textContent = r.msg; return; }
+  const yes = String(r.verdict).startsWith('1');
+  box.innerHTML = `<span class="${yes ? 'v-yes' : 'v-no'}">${yes ? '会接话' : '不接'}</span>`
+    + ` · 判官输出 ${esc(r.verdict)} · ${esc(r.source)} · ${r.ms}ms`;
+}
+
+async function delMemory(id) {
+  if (!confirm('删掉这条记忆？')) return;
+  const r = await (await fetch('/api/memories/delete', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({ids: [id]})
+  })).json();
+  if (!r.ok) { alert(r.msg); return; }
+  document.getElementById('msg').textContent = r.msg;
+  setTimeout(() => document.getElementById('msg').textContent = '', 4000);
+  refresh();
+}
+
+async function clearAllMemories() {
+  if (!confirm('清空全部记忆？这个不可恢复')) return;
+  const r = await (await fetch('/api/memories/delete', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({all: true})
+  })).json();
+  alert(r.msg || 'done');
+  refresh();
+}
+
+
+
+
+async function loadProfile() {
+  try {
+    const r = await (await fetch('/api/profile?t=' + Date.now())).json();
+    document.getElementById('profileMode').textContent =
+      '当前模式：' + (r.mode === 'third_party' ? '第三方 API' : '本地模型') +
+      ' · 表情概率 ' + Math.round(r.meme_chance * 100) + '%' +
+      ' · 文本规则 ' + r.rule_count + ' 条';
+    document.getElementById('profMeme').checked = !!r.meme_on;
+    document.getElementById('profRules').checked = !!r.rules_on;
+    document.getElementById('profMemeMeta').textContent = r.meme_on ? '（已开）' : '（已关）';
+    document.getElementById('profRulesMeta').textContent = r.rules_on ? '（' + r.rule_count + ' 条）' : '（已关）';
+    greyLocalControls(!!r.meme_on, !!r.rules_on);
+  } catch (e) { console.error('loadProfile', e); }
+}
+
+async function applyProfile(preset) {
+  document.getElementById('profileMsg').textContent = '应用中…';
+  const r = await (await fetch('/api/profile', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({preset})
+  })).json();
+  document.getElementById('profileMsg').textContent = r.msg || (r.ok ? '已应用' : '失败');
+  loadProfile(); loadReply();
+  const api = document.getElementById('profileMode').textContent.includes('第三方');
+  greyLocalControls(document.getElementById('profMeme').checked,
+                    document.getElementById('profRules').checked);
+}
+
+async function toggleProfile(which) {
+  const body = which === 'meme'
+    ? {meme_on: document.getElementById('profMeme').checked}
+    : {rules_on: document.getElementById('profRules').checked};
+  const r = await (await fetch('/api/profile', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  })).json();
+  document.getElementById('profileMsg').textContent = r.msg || '已更新';
+  loadProfile(); loadReply();
+}
+
+async function loadLtmPrompt() {
+  try {
+    const r = await (await fetch('/api/ltm/prompt?t=' + Date.now())).json();
+    document.getElementById('ltmPrompt').value = r.text || '';
+    if (!r.has_placeholders) {
+      document.getElementById('ltmPromptMsg').textContent = '警告：缺少占位符，提取会失败';
+    }
+  } catch (e) { console.error('loadLtmPrompt', e); }
+}
+
+async function saveLtmPrompt() {
+  const text = document.getElementById('ltmPrompt').value;
+  document.getElementById('ltmPromptMsg').textContent = '保存中…';
+  const r = await (await fetch('/api/ltm/prompt', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({text})
+  })).json();
+  document.getElementById('ltmPromptMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+}
+
+async function loadVisionMode() {
+  try {
+    const r = await (await fetch('/api/visionmode?t=' + Date.now())).json();
+    const names = {local:'本地 VL 读图', third_party:'第三方看图', off:'关闭读图'};
+    document.getElementById('vmState').textContent =
+      '当前：' + (names[r.mode] || r.mode) +
+      ' · 本地 VL ' + (r.up ? '在线' : '离线') +
+      ' · 模型 ' + r.model + ' · 端口 ' + r.port +
+      ' · 主模型模式 ' + (r.api_mode === 'third_party' ? '第三方' : '本地');
+    for (const [id, mode] of [['vmLocal','local'],['vmApi','third_party'],['vmOff','off']]) {
+      const btn = document.getElementById(id);
+      const active = r.mode === mode;
+      btn.className = active ? 'primary' : '';
+      btn.style.opacity = active ? 1 : 0.75;
+    }
+  } catch (e) { console.error('loadVisionMode', e); }
+}
+
+async function setVisionMode(mode) {
+  const r = await (await fetch('/api/visionmode', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({mode})
+  })).json();
+  document.getElementById('vmMsg').textContent = r.msg || (r.ok ? '已切换' : '失败');
+  loadVisionMode();
+loadProfile();
+loadLtmPrompt();
+}
+
+async function vlControl(action) {
+  document.getElementById('vmMsg').textContent = action === 'start' ? '启动中…' : '停止中…';
+  const r = await (await fetch('/api/vl/' + action, {method: 'POST'})).json();
+  document.getElementById('vmMsg').textContent = r.msg || (r.ok ? '完成' : '失败');
+  setTimeout(loadVisionMode, 1500);
+}
+
+async function loadGuard() {
+  try {
+    const r = await (await fetch('/api/guard?t=' + Date.now())).json();
+    const modeText = r.mode === 'third_party'
+      ? '当前模式：第三方 API（审查与额度生效）'
+      : '当前模式：本地模型（审查与额度不生效）';
+    document.getElementById('guardMode').textContent = modeText;
+    const groups = r.groups || [];
+    document.getElementById('reviewList').innerHTML = groups.length
+      ? groups.map(g => `<label style="display:flex;gap:8px;align-items:center;padding:4px 0;color:var(--text)">
+          <input type="checkbox" class="reviewPick" data-gid="${esc(g)}" ${r.review_groups[g] ? 'checked' : ''}>
+          <span>${esc(g)}</span></label>`).join('')
+      : '<span class="hint">白名单里还没有群</span>';
+    document.getElementById('quotaBox').value = r.daily_limit || 0;
+    const used = r.used || {};
+    document.getElementById('quotaUsed').textContent =
+      '今日已用 ' + (used.tokens || 0) + ' tokens' + (used.date ? '（' + used.date + '）' : '');
+    document.getElementById('saveTokenBox').checked = !!r.save_token;
+    document.getElementById('histKeep').value = r.history_keep || 10;
+    document.getElementById('histKeepVal').textContent = (r.history_keep || 10) + ' 条';
+  } catch (e) { console.error('loadGuard', e); }
+}
+
+async function saveGuardConfig() {
+  const review = {};
+  document.querySelectorAll('.reviewPick').forEach(c => { review[c.dataset.gid] = c.checked; });
+  const body = {
+    review_groups: review,
+    daily_limit: parseInt(document.getElementById('quotaBox').value || '0', 10),
+    save_token: document.getElementById('saveTokenBox').checked,
+    history_keep: parseInt(document.getElementById('histKeep').value, 10)
+  };
+  document.getElementById('guardMsg').textContent = '保存中…';
+  const r = await (await fetch('/api/guard', {
+    method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify(body)
+  })).json();
+  document.getElementById('guardMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+}
+
+async function loadThinking() {
+  try {
+    const r = await (await fetch('/api/thinking?t=' + Date.now())).json();
+    document.getElementById('thinkBox').checked = r.enable;
+    document.getElementById('thinkBudget').value = r.budget;
+    document.getElementById('thinkBudgetVal').textContent = r.budget + ' tok';
+
+    // 第三方模式：双判官要本地 9B，按规定停用；预算改用强度档
+    const api = r.mode === 'third_party';
+    const dj = document.getElementById('dualJudgeBox');
+    dj.disabled = api;
+    dj.style.opacity = api ? 0.35 : 1;
+    if (api) {
+      dj.checked = false;
+      const slider = document.getElementById('thinkBudget');
+      slider.disabled = false;
+      slider.style.opacity = 1;
+      slider.min = 400;
+      slider.max = 2400;
+      slider.step = 100;
+      const toEffort = v => (v <= 800 ? 'low（低）' : (v <= 1500 ? 'high（中）' : 'max（高）'));
+      document.getElementById('thinkBudgetVal').textContent =
+        r.budget + ' tok ≈ ' + toEffort(r.budget);
+      slider.oninput = function () {
+        document.getElementById('thinkBudgetVal').textContent =
+          this.value + ' tok ≈ ' + toEffort(parseInt(this.value, 10));
+      };
+    }
+  } catch (e) { console.error(e); }
+}
+
+async function applyThinking() {
+  const body = {
+    enable: document.getElementById('thinkBox').checked,
+    budget: parseInt(document.getElementById('thinkBudget').value, 10)
+  };
+  document.getElementById('thinkMsg').textContent = '保存中…';
+  const r = await (await fetch('/api/thinking', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  })).json();
+  document.getElementById('thinkMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+}
+
+async function loadLtmRecent() {
+  try {
+    const r = await (await fetch('/api/ltm/recent?limit=40&t=' + Date.now())).json();
+    document.getElementById('ltmList').innerHTML = r.items.length
+      ? r.items.map(m => `<label style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line);color:var(--text)">
+          <input type="checkbox" class="ltmPick" data-uid="${esc(m.uid)}" data-text="${esc(m.text)}" style="margin-top:3px">
+          <span style="flex:1"><span class="meta">${esc(m.at)} · QQ ${esc(m.uid)} · ${esc(m.name)}</span>${esc(m.text)}</span>
+        </label>`).join('')
+      : '<span class="hint">没有可用消息</span>';
+  } catch (e) { console.error(e); }
+}
+
+async function addSelectedMemories() {
+  const picked = [...document.querySelectorAll('.ltmPick:checked')].map(c => ({
+    uid: c.dataset.uid, text: c.dataset.text
+  }));
+  if (!picked.length) { document.getElementById('ltmMsg').textContent = '先勾选几条'; return; }
+  document.getElementById('ltmMsg').textContent = '写入中…';
+  const r = await (await fetch('/api/ltm/add', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({items: picked})
+  })).json();
+  document.getElementById('ltmMsg').textContent = r.msg || (r.ok ? '已加入' : '失败');
+  if (r.ok) refresh();
+}
+
+
+function greyLocalControls(memeOn, rulesOn) {
+  const meme = document.getElementById('memeSlider');
+  const rules = document.getElementById('rulesBox');
+  if (meme) {
+    meme.disabled = !memeOn;
+    meme.style.opacity = memeOn ? 1 : 0.35;
+    const v = document.getElementById('memeVal');
+    if (v) v.textContent = memeOn ? Math.round(parseFloat(meme.value) * 100) + '%' : '已关闭';
+  }
+  if (rules) {
+    rules.disabled = !rulesOn;
+    rules.style.opacity = rulesOn ? 1 : 0.35;
+    rules.placeholder = rulesOn ? '' : '已关闭（在上方“本地优化”面板里打开）';
+  }
+}
+
+async function loadReply() {
+  try {
+  const r = await (await fetch('/api/reply?t=' + Date.now())).json();
+  document.getElementById('replySlider').value = r.reply_chance;
+  document.getElementById('replyVal').textContent = Math.round(r.reply_chance * 100) + '%';
+  document.getElementById('dualJudgeBox').checked = !!r.dual_judge;
+  document.getElementById('budgetSlider').value = r.reply_budget || 8;
+  document.getElementById('budgetVal').textContent = (r.reply_budget || 8) + ' 条';
+  document.getElementById('summonBox').value = (r.summon || []).join(', ');
+  document.getElementById('histSlider').value = r.history_minutes || 30;
+  document.getElementById('histVal').textContent = (r.history_minutes || 30) + ' 分钟';
+  document.getElementById('memeSlider').value = r.meme_chance;
+  document.getElementById('memeVal').textContent = Math.round(r.meme_chance * 100) + '%';
+  const rules = r.text_rules || [];
+  document.getElementById('rulesBox').value = rules
+    .map(x => `${x.pattern} => ${x.to}`).join('\n');
+  greyLocalControls((r.meme_chance || 0) > 0, rules.length > 0);
+  } catch (e) { console.error('loadReply', e); }
+}
+
+async function applyReply() {
+  const el = (id) => document.getElementById(id);
+  const chance = parseFloat((el('memeSlider') || {}).value || 0.3);
+  const replyChance = parseFloat((el('replySlider') || {}).value || 1);
+  const historyMinutes = parseFloat((el('histSlider') || {}).value || 30);
+  const summon = ((el('summonBox') || {}).value || '')
+    .split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
+  const rules = ((el('rulesBox') || {}).value || '').split('\n')
+    .map(line => line.trim()).filter(Boolean)
+    .map(line => {
+      const i = line.indexOf('=>');
+      if (i < 0) return null;
+      const pattern = line.slice(0, i).trim();
+      const to = line.slice(i + 2).trim();
+      return pattern ? { pattern, to } : null;
+    }).filter(Boolean);
+  el('replyMsg').textContent = '保存中…';
+  const r = await (await fetch('/api/reply', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({
+      meme_chance: chance,
+      reply_chance: replyChance,
+      history_minutes: historyMinutes,
+      reply_budget: parseInt((el('budgetSlider') || {}).value || 8, 10),
+      dual_judge: !!(el('dualJudgeBox') || {}).checked,
+      summon: summon,
+      text_rules: rules
+    })
+  })).json();
+  el('replyMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+  loadReply();
+}
+
+function fillDefaultRule() {
+  const box = document.getElementById('rulesBox');
+  if (!box) return;
+  const line = '。(?=\\s|$|[（(\\[【「『]) => ~';
+  box.value = box.value.trim() ? box.value + '\n' + line : line;
+}
+
+async function loadSampling() {
+  try {
+    const r = await (await fetch('/api/sampling?t=' + Date.now())).json();
+    document.getElementById('tempSlider').value = r.temperature;
+    document.getElementById('rpSlider').value = r.repeat_penalty;
+    document.getElementById('mtSlider').value = r.max_tokens;
+    document.getElementById('tempVal').textContent = r.temperature;
+    document.getElementById('rpVal').textContent = r.repeat_penalty;
+    document.getElementById('mtVal').textContent = r.max_tokens;
+
+    // 第三方模式：repeat_penalty 不支持，置灰
+    const api = r.mode === 'third_party';
+    const rp = document.getElementById('rpSlider');
+    rp.disabled = api;
+    rp.style.opacity = api ? 0.35 : 1;
+    const rpNote = document.getElementById('rpVal');
+    rpNote.textContent = api ? 'API 不支持' : r.repeat_penalty;
+
+    // 单条上限：本地 40~600，第三方 40~2000
+    const mt = document.getElementById('mtSlider');
+    mt.min = 40;
+    mt.max = api ? 2000 : 600;
+    mt.step = api ? 20 : 10;
+    if (parseInt(mt.value, 10) > parseInt(mt.max, 10)) mt.value = mt.max;
+    document.getElementById('mtVal').textContent =
+      mt.value + ' tok' + (api ? '' : '（本地）');
+  } catch (e) {}
+}
+
+async function applySampling() {
+  const body = {
+    temperature: parseFloat(document.getElementById('tempSlider').value),
+    repeat_penalty: parseFloat(document.getElementById('rpSlider').value),
+    max_tokens: parseInt(document.getElementById('mtSlider').value, 10),
+  };
+  document.getElementById('sampMsg').textContent = '保存中…';
+  const r = await (await fetch('/api/sampling', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(body)
+  })).json();
+  document.getElementById('sampMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+}
+
+async function loadContexts() {
+  const r = await (await fetch('/api/contexts?t=' + Date.now())).json();
+  document.getElementById('ctxList').innerHTML = r.items.length
+    ? r.items.map(c => `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)">
+        <span style="flex:1">${esc(c.umo)}<span class="meta"> · ${c.messages} 条 · ${c.kb} KB · ${esc(c.updated)}</span></span>
+        <button style="padding:3px 10px;font-size:11.5px" onclick="clearContext('${esc(c.umo)}')">清空</button>
+      </div>`).join('')
+    : '<span class="hint">没有存下来的对话</span>';
+}
+
+async function clearContext(umo) {
+  if (!confirm('清空这个会话的上下文？')) return;
+  const r = await (await fetch('/api/contexts/clear', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({umo})
+  })).json();
+  if (!r.ok) { alert(r.msg); return; }
+  loadContexts();
+}
+
+async function clearAllContexts() {
+  if (!confirm('清空全部会话上下文？')) return;
+  const r = await (await fetch('/api/contexts/clear', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({all: true})
+  })).json();
+  if (!r.ok) { alert(r.msg); return; }
+  loadContexts();
+}
+
+async function loadAutoReply() {
+  const r = await (await fetch('/api/autoreply?t=' + Date.now())).json();
+  document.getElementById('autoList').innerHTML = r.items.map(w => `
+    <div class="pitem" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <label style="margin:0;display:flex;align-items:center;gap:8px;color:var(--text)">
+        <input type="checkbox" data-agid="${w.id}" ${w.enabled ? 'checked' : ''}>
+        ${w.id}${w.whitelisted ? '' : ' <span class="meta">未在白名单</span>'}
+      </label>
+      <span class="meta">${w.count} 条 · ${esc(w.last || '—')}</span>
+    </div>`).join('') || '<span class="hint">还没有可用群</span>';
+}
+
+async function saveAutoReply() {
+  const items = [...document.querySelectorAll('#autoList input[type=checkbox]')].map(cb => ({
+    id: cb.dataset.agid, enabled: cb.checked
+  }));
+  document.getElementById('autoMsg').textContent = '保存中…';
+  const r = await (await fetch('/api/autoreply', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({items})
+  })).json();
+  document.getElementById('autoMsg').textContent = r.msg || '已保存';
+}
+
+async function loadModels() {
+  try {
+    const m = await (await fetch('/api/models?t=' + Date.now())).json();
+    const sel = document.getElementById('modelSel');
+    sel.innerHTML = m.items.map(n =>
+      `<option value="${esc(n)}" ${n === m.current ? 'selected' : ''}>${esc(n)}${n === m.current ? ' ← 当前' : ''}</option>`
+    ).join('');
+    document.getElementById('modelMsg').textContent = '当前：' + (m.current || '未知');
+  } catch (e) {}
+}
+
+async function applyModel() {
+  const sel = document.getElementById('modelSel');
+  const name = sel.value;
+  document.getElementById('modelMsg').textContent = '切换中…';
+  const r = await (await fetch('/api/models', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({model: name})
+  })).json();
+  document.getElementById('modelMsg').textContent = r.msg || (r.ok ? '已切换' : '失败');
+  setTimeout(loadModels, 8000);
+}
+
+async function loadVision() {
+  try {
+    const v = await (await fetch('/api/vision')).json();
+    document.getElementById('capEntries').textContent = v.cache_entries;
+    document.getElementById('capHits').textContent = v.cache_hits;
+    document.getElementById('memeImages').textContent = v.meme_images + ' / ' + v.meme_packs + ' 包';
+    document.getElementById('capList').innerHTML = v.recent.length
+      ? v.recent.map(r => `<li><span class="meta">${esc(r.at)} · ${esc(r.hash)}</span>${esc(r.text)}</li>`).join('')
+      : '<li class="empty">还没识别过图片</li>';
+  } catch (e) {}
+}
+
+async function loadPlugins() {
+  const r = await (await fetch('/api/plugins')).json();
+  document.getElementById('plist').innerHTML = r.items.map(p =>
+    `<div class="pitem"><b>${esc(p.name)}</b>
+      <span class="meta">${esc(p.slug)} · v${esc(p.version)} · ${p.files} 个 py 文件</span>
+      <div class="hint" style="margin-top:4px">${esc(p.desc)}</div>
+    </div>`
+  ).join('') || '<span class="hint">没有插件</span>';
+}
+
+async function act(kind) {
+  document.getElementById('msg').textContent = '执行中…';
+  const r = await (await fetch('/api/' + kind, {method:'POST'})).json();
+  document.getElementById('msg').textContent = r.msg;
+  setTimeout(() => document.getElementById('msg').textContent = '', 8000);
+  setTimeout(refresh, 4000);
+}
+
+refresh();
+loadAccess();
+loadWater();
+loadContexts();
+loadAutoReply();
+loadLtmRecent();
+loadReply();
+loadThinking();
+loadGuard();
+loadVisionMode();
+loadSampling();
+loadPersona();
+loadJudge();
+loadModels();
+loadVision();
+loadPlugins();
+setInterval(refresh, 5000);
+</script>
+</body>
+</html>

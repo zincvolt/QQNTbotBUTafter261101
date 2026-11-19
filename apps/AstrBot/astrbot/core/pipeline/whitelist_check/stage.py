@@ -1,0 +1,87 @@
+import time
+from collections.abc import AsyncGenerator
+
+from astrbot.core import logger
+from astrbot.core.message.message_event_result import MessageChain
+from astrbot.core.platform.astr_message_event import AstrMessageEvent
+from astrbot.core.platform.message_type import MessageType
+
+from ..context import PipelineContext
+from ..stage import Stage, register_stage
+
+# 未授权私聊的自动回复（同一发送者 5 分钟内只回一次，避免刷屏）
+_UNAUTHORIZED_NOTICE = "未授权：这个号只给我的主人用，不接外客"
+_NOTICE_COOLDOWN_SECONDS = 300
+_last_notice_at: dict[str, float] = {}
+
+
+@register_stage
+class WhitelistCheckStage(Stage):
+    """检查是否在群聊/私聊白名单"""
+
+    async def initialize(self, ctx: PipelineContext) -> None:
+        self.enable_whitelist_check = ctx.astrbot_config["platform_settings"][
+            "enable_id_white_list"
+        ]
+        self.whitelist = ctx.astrbot_config["platform_settings"]["id_whitelist"]
+        self.whitelist = [
+            str(i).strip() for i in self.whitelist if str(i).strip() != ""
+        ]
+        self.wl_ignore_admin_on_group = ctx.astrbot_config["platform_settings"][
+            "wl_ignore_admin_on_group"
+        ]
+        self.wl_ignore_admin_on_friend = ctx.astrbot_config["platform_settings"][
+            "wl_ignore_admin_on_friend"
+        ]
+        self.wl_log = ctx.astrbot_config["platform_settings"]["id_whitelist_log"]
+
+    async def process(
+        self,
+        event: AstrMessageEvent,
+    ) -> None | AsyncGenerator[None, None]:
+        if not self.enable_whitelist_check:
+            # 白名单检查未启用
+            return
+
+        if len(self.whitelist) == 0:
+            # 白名单为空，不检查
+            return
+
+        if event.get_platform_name() == "webchat":
+            # WebChat 豁免
+            return
+
+        # 检查是否在白名单
+        if self.wl_ignore_admin_on_group:
+            if (
+                event.role == "admin"
+                and event.get_message_type() == MessageType.GROUP_MESSAGE
+            ):
+                return
+        if self.wl_ignore_admin_on_friend:
+            if (
+                event.role == "admin"
+                and event.get_message_type() == MessageType.FRIEND_MESSAGE
+            ):
+                return
+        if (
+            event.unified_msg_origin not in self.whitelist
+            and str(event.get_group_id()).strip() not in self.whitelist
+        ):
+            if self.wl_log:
+                logger.info(
+                    f"Session ID {event.unified_msg_origin} is not in the session "
+                    "allowlist, so event propagation was stopped. Add this session "
+                    "ID in WebUI: Config -> Access Control -> Whitelist -> "
+                    "Whitelist ID List, using the profile assigned to this bot.",
+                )
+            if event.get_message_type() == MessageType.FRIEND_MESSAGE:
+                sender = str(event.get_sender_id())
+                now = time.time()
+                if now - _last_notice_at.get(sender, 0.0) > _NOTICE_COOLDOWN_SECONDS:
+                    _last_notice_at[sender] = now
+                    try:
+                        await event.send(MessageChain().message(_UNAUTHORIZED_NOTICE))
+                    except Exception as exc:  # noqa: BLE001 - notice is best effort
+                        logger.warning(f"Failed to send unauthorized notice: {exc}")
+            event.stop_event()

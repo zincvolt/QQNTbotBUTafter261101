@@ -1,0 +1,60 @@
+# QQNTBOT 代码仓 .gitignore
+# 用途：GitHub 私有仓，只存"能读懂、能重建逻辑"的代码与配置模板。
+# 二进制、依赖、凭证、数据库一律不入库。
+
+# 依赖与运行时
+.venv/
+venv/
+node_modules/
+runtime/
+apps/AstrBot/data/dist/
+apps/NapCat/
+apps/LiteLoader/
+apps/REA/
+
+# 二进制（改造版 QQ.exe / dbghelp.dll 侵权风险，绝不入库）
+*.exe
+*.dll
+*.so
+*.pyd
+*.bin
+*.gguf
+_backup/
+
+# 数据库（运行数据，含隐私）
+*.db
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite3
+data/*.db
+
+# 凭证（泄露风险）
+_tmp_*
+*_cred*
+*_token*
+*_headers*
+apps/NapCat/config/webui.json
+login-qr*.png
+登录二维码.html
+*.totp
+
+# 缓存与日志
+__pycache__/
+*.py[cod]
+*.log
+*.out
+*.err
+apps/AstrBot/data/logs/
+apps/NapCat/logs/
+data/furcons_cards/
+data/temp/
+data/caption_cache.db
+data/furcons_cache.json
+
+# 编辑器 / 系统
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini
+.DS_Store

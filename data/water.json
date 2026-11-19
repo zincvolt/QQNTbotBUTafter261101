@@ -1,0 +1,12 @@
+{
+  "groups": {
+    "1128093050": {
+      "enabled": false,
+      "idle_min": 90
+    },
+    "942316942": {
+      "enabled": false,
+      "idle_min": 90
+    }
+  }
+}

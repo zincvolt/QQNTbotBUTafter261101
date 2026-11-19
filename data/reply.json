@@ -1,0 +1,19 @@
+{
+  "meme_chance": 0.0,
+  "reply_chance": 0.3,
+  "history_minutes": 20.0,
+  "text_rules": [
+    {
+      "pattern": "。(?=\\s|$|[（(\\[【「『])",
+      "to": "~"
+    }
+  ],
+  "reply_budget": 7,
+  "reply_budget_minutes": 10,
+  "dual_judge": false,
+  "dual_judge_model": "DeepSeek-V4-Pro-Qwen3.5-9B-UNCENSORED-heretic-MTP",
+  "thinking": {
+    "enable": false,
+    "budget": 0
+  }
+}

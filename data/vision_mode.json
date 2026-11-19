@@ -1,0 +1,5 @@
+{
+  "mode": "third_party",
+  "port": 8085,
+  "model": "Qwen3VL-4B-Instruct"
+}
