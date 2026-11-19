@@ -30,10 +30,10 @@
 |---|---|---|
 | Windows | PowerShell 5.1（脚本按其语法写） | ✅ |
 | Python | 3.10+，给 AstrBot 和各服务用 | ✅ 官网 |
-| QQNT | **9.9.25（build 42905/42941）**，版本锁死 | ⚠️ 需旧版安装包 |
-| 改造版 QQ.exe + dbghelp.dll | 绕过文件校验，**仅匹配 9.9.25** | ❌ 非公开，侵权风险 |
-| NapCat | 上游已删库的 fork，跑在 QQ 进程内 | ❌ 需自行获取 |
-| LiteLoader | QQNT 加载器 | ⚠️ 第三方渠道 |
+| QQNT | **9.9.25（build 42905/42941）** | ⚠️ 需旧版安装包 |
+| 改过的QQ.exe + dbghelp.dll | 注入Liteloader，**匹配 9.9.25** | ❌ |
+| LiteLoader | QQNT 加载器 | github |
+| NapCat | 跑路了！ | ❌ |
 | AstrBot | **4.29.4** 发行版（含 venv / main.py / requirements） | ✅ 官方，但需旧版 |
 | 模型服务 | 本地 9B / 判官 1.7B / OCR / 向量 = 独立目录 `D:\LLM` | ⚠️ 见 §1.2 |
 
@@ -57,9 +57,9 @@
 1. 安装 QQNT **9.9.25**（旧版安装包需自行寻找）。
 2. 装完后立刻用 `scripts\block_update.ps1` 屏蔽更新域名（hosts），否则一升级注入就失效。
 3. 验证：`C:\Program Files\Tencent\QQNT\versions\config.json` 里 `curVersion` 应为 `9.9.25-42905`。
-4. 替换改造版 `QQ.exe` + `dbghelp.dll`（这两个文件不在本仓库，需原作者提供）。
+4. 替换改造版 `QQ.exe` + `dbghelp.dll`（见liteloader官方telegram频道）。
 5. 装 NapCat + LiteLoader 入口：`scripts\install_napcat_entry.ps1`。
-   - 装完确认 NapCat WebUI 端口 6099 起来，token 在 `apps\NapCat\config\webui.json`（此文件不入库）。
+   - 装完确认 NapCat WebUI 端口 6099 起来，token 在 `apps\NapCat\config\webui.json`（已跑路（本项目采用REA逆向（bushi）））。
 
 > `start-all.ps1` 开头有**版本守卫**：版本不对只警告不硬拦，但注入必然失效，等于白跑。
 
