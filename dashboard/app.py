@@ -8,6 +8,7 @@ writing the JSON config files that the plugins read.
 from __future__ import annotations
 
 import json
+import os
 import re
 import socket
 import sqlite3
@@ -21,7 +22,24 @@ import psutil
 from fastapi import FastAPI, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
-ROOT = Path(r"D:\QQNTBOT")
+def _detect_root() -> Path:
+    """Find the project root that owns data/ and apps/.
+
+    Order: QQNTBOT_ROOT env var > directory layout > legacy hardcoded path.
+    In a GitHub checkout this file sits in <root>/dashboard, so the parent is
+    the root; on the original install it resolves to D:\\QQNTBOT as before.
+    """
+    env = os.environ.get("QQNTBOT_ROOT")
+    if env:
+        return Path(env).expanduser().resolve()
+    here = Path(__file__).resolve().parent
+    if (here.parent / "data").is_dir() or (here.parent / "apps").is_dir():
+        return here.parent
+    legacy = Path(r"D:\QQNTBOT")
+    return legacy if legacy.exists() else here.parent
+
+
+ROOT = _detect_root()
 MEM_DB = ROOT / "data" / "memory.db"
 BOT_DB = ROOT / "apps" / "AstrBot" / "data" / "data_v4.db"
 CFG = ROOT / "apps" / "AstrBot" / "data" / "cmd_config.json"
@@ -37,7 +55,8 @@ JUDGE_URL = "http://127.0.0.1:8082/v1/chat/completions"
 
 CAPTION_DB = ROOT / "data" / "caption_cache.db"
 MEME_DIR = ROOT / "apps" / "AstrBot" / "data" / "plugin_data" / "meme_manager"
-MODELS_INI = Path(r"D:\LLM\scripts\models.ini")
+MODELS_INI = Path(os.environ.get("LLAMA_MODELS_INI", r"D:\LLM\scripts\models.ini"))
+LLM_LOG = Path(os.environ.get("LLAMA_LOG_FILE", r"D:\LLM\logs\llama-router.log"))
 
 PORTS = {
     "model": (8080, "本地模型"),
@@ -90,7 +109,7 @@ def api_mode() -> str:
         ``third_party`` when DeepSeek is the chat provider, else ``local``.
     """
     try:
-        cfg = json.loads(CFG.read_text(encoding="utf-8-sig"))
+        cfg = read_json(CFG, {})
         model = (cfg.get("agent_runner", {}).get("config", {}).get("model", {}))
         provider_id = str(model.get("provider_id", ""))
         if provider_id:
@@ -227,8 +246,8 @@ def recent_activity() -> dict:
 
 def read_access() -> dict:
     """Return the allowlist split into groups and private accounts."""
-    cfg = json.loads(CFG.read_text(encoding="utf-8"))
-    entries = cfg["platform_settings"]["id_whitelist"]
+    cfg = read_json(CFG, {})
+    entries = (cfg.get("platform_settings") or {}).get("id_whitelist", []) or []
     groups = [str(e) for e in entries if str(e).isdigit()]
     friends = [str(e).rsplit(":", 1)[-1] for e in entries if "FriendMessage" in str(e)]
     return {"groups": groups, "friends": friends, "admin": cfg.get("admins_id", [])}
@@ -236,7 +255,7 @@ def read_access() -> dict:
 
 def write_access(groups: list[str], friends: list[str]) -> list[str]:
     """Persist a new allowlist into the AstrBot config."""
-    cfg = json.loads(CFG.read_text(encoding="utf-8"))
+    cfg = read_json(CFG, {})
     entries = [f"qq:FriendMessage:{u}" for u in friends] + groups
     cfg["platform_settings"]["id_whitelist"] = entries
     CFG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
@@ -366,7 +385,7 @@ def newest(directory: Path, pattern: str) -> Path | None:
 def read_json(path: Path, default: dict) -> dict:
     """Read a JSON file, falling back to a default when missing or broken."""
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        return json.loads(path.read_text(encoding="utf-8-sig"))
     except (OSError, json.JSONDecodeError):
         return default
 
@@ -390,6 +409,52 @@ def restart_bot() -> None:
         ],
         creationflags=subprocess.CREATE_NO_WINDOW,
     )
+
+
+def capability_report() -> dict:
+    """Tell the UI which optional backends this install can actually serve.
+
+    This repo ships code and config templates only - a fresh checkout has no
+    SQLite databases, no model services and no patched binaries.  The dashboard
+    uses this map to grey out panels whose API would otherwise fail or hang on
+    "loading".  Absence is reported with a human-readable reason.
+    """
+    scripts_ok = all((ROOT / s).exists() for s in ("start-all.ps1", "stop-all.ps1"))
+    logs_ok = any(p.exists() for p in (BOT_LOG_DIR, NAPCAT_LOG_DIR, LLM_LOG.parent))
+    if api_mode() == "third_party":
+        models_ok = True
+    else:
+        try:
+            # Switching models writes into cmd_config.json, so the config must
+            # exist even when models.ini is present.
+            models_ok = CFG.exists() and bool(available_models() or current_model())
+        except (OSError, ValueError, json.JSONDecodeError):
+            models_ok = False
+
+    caps = {
+        "core": (True, ""),
+        "config": (CFG.exists(), "缺少 apps/AstrBot/data/cmd_config.json"),
+        "botdb": (BOT_DB.exists(), "缺少聊天数据库 data_v4.db"),
+        "memdb": (MEM_DB.exists(), "缺少记忆数据库 memory.db"),
+        "embedding": (port_open(8097), "向量服务 8097 未启动"),
+        "judge": (port_open(8082), "判官服务 8082 未启动"),
+        "vl": (port_open(8085), "本地读图服务 8085 未启动"),
+        "models": (models_ok, "没有可用模型预设，也没有配置第三方模型"),
+        "logs": (logs_ok, "找不到日志文件目录"),
+        "scripts": (scripts_ok, "缺少 start-all.ps1 / stop-all.ps1"),
+        "plugins": (PLUGIN_DIR.exists(), "缺少 plugins 目录"),
+        "caption": (CAPTION_DB.exists(), "缺少图片缓存 caption_cache.db"),
+    }
+    return {
+        name: {"available": ok, "reason": "" if ok else reason}
+        for name, (ok, reason) in caps.items()
+    }
+
+
+@app.get("/api/capabilities")
+def capabilities() -> JSONResponse:
+    """Return which optional panels this deployment can actually use."""
+    return JSONResponse(capability_report())
 
 
 @app.get("/api/status")
@@ -421,7 +486,7 @@ def logs(src: str = "astrbot", lines: int = 120) -> JSONResponse:
         path = newest(NAPCAT_LOG_DIR, "*.log")
         data = tail(path, lines) if path else ["(还没有 NapCat 日志)"]
     elif src == "router":
-        data = tail(Path(r"D:\LLM\logs\llama-router.log"), lines)
+        data = tail(LLM_LOG, lines)
     elif src == "astrbot":
         data = tail(BOT_LOG_DIR / "astrbot.log", lines)
     else:
@@ -594,7 +659,7 @@ async def delete_memories(request: Request) -> JSONResponse:
 @app.get("/api/thinking")
 def get_thinking() -> JSONResponse:
     """Return the thinking switch and token budget for the active provider."""
-    cfg = json.loads(CFG.read_text(encoding="utf-8-sig"))
+    cfg = read_json(CFG, {})
     body = active_provider(cfg).get("custom_extra_body", {})
     if api_mode() == "third_party":
         thinking = body.get("thinking") or {}
@@ -635,7 +700,7 @@ async def save_thinking(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "msg": "预算格式不对"})
     budget = max(200, min(4000, budget))
 
-    cfg = json.loads(CFG.read_text(encoding="utf-8-sig"))
+    cfg = read_json(CFG, {})
     provider = active_provider(cfg)
     extra = provider.setdefault("custom_extra_body", {})
     if api_mode() == "third_party":
@@ -709,7 +774,7 @@ async def save_reply(request: Request) -> JSONResponse:
 
     if "dual_judge" in body:
         current["dual_judge"] = bool(body["dual_judge"])
-        cfg = json.loads(CFG.read_text(encoding="utf-8-sig"))
+        cfg = read_json(CFG, {})
         current["dual_judge_model"] = cfg["provider"][0]["model"]
     current["meme_chance"] = chance
     current["reply_chance"] = reply_chance
@@ -741,7 +806,7 @@ async def save_reply(request: Request) -> JSONResponse:
 @app.get("/api/sampling")
 def get_sampling() -> JSONResponse:
     """Return the sampling parameters used for chat."""
-    cfg = json.loads(CFG.read_text(encoding="utf-8-sig"))
+    cfg = read_json(CFG, {})
     body = active_provider(cfg).get("custom_extra_body", {})
     return JSONResponse(
         {
@@ -771,7 +836,7 @@ async def save_sampling(request: Request) -> JSONResponse:
     if not 1.0 <= repeat_penalty <= 2.0:
         return JSONResponse({"ok": False, "msg": "重复惩罚要在 1.0~2.0 之间"})
 
-    cfg = json.loads(CFG.read_text(encoding="utf-8-sig"))
+    cfg = read_json(CFG, {})
     extra = active_provider(cfg).setdefault("custom_extra_body", {})
     extra["temperature"] = temperature
     extra["top_p"] = top_p
@@ -1097,7 +1162,7 @@ async def save_ltm_prompt(request: Request) -> JSONResponse:
 def get_guard() -> JSONResponse:
     """Return review switches, quota, save-token flag and history window."""
     state = read_guard()
-    cfg = json.loads(CFG.read_text(encoding="utf-8-sig"))
+    cfg = read_json(CFG, {})
     whitelist = (
         cfg.get("platform_settings", {}).get("id_whitelist", []) or []
     )
@@ -1232,7 +1297,7 @@ def available_models() -> list[str]:
 
 def current_model() -> str:
     """Return the model currently configured for chat."""
-    cfg = json.loads(CFG.read_text(encoding="utf-8-sig"))
+    cfg = read_json(CFG, {})
     try:
         return str(cfg["provider"][0].get("model", ""))
     except (KeyError, IndexError):
@@ -1246,7 +1311,7 @@ API_MODELS = ["deepseek-flash", "deepseek-v4-pro"]
 def models() -> JSONResponse:
     """List switchable models and the active one for the current mode."""
     if api_mode() == "third_party":
-        cfg = json.loads(CFG.read_text(encoding="utf-8-sig"))
+        cfg = read_json(CFG, {})
         return JSONResponse(
             {
                 "items": API_MODELS,
@@ -1268,7 +1333,7 @@ async def switch_model(request: Request) -> JSONResponse:
     allowed = API_MODELS if third else available_models()
     if name not in allowed:
         return JSONResponse({"ok": False, "msg": f"没有这个预设：{name}"})
-    cfg = json.loads(CFG.read_text(encoding="utf-8-sig"))
+    cfg = read_json(CFG, {})
     active_provider(cfg)["model"] = name
     CFG.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
     restart_bot()

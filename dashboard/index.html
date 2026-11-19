@@ -59,7 +59,7 @@
   .procs span:nth-child(3n) { color:var(--dim); text-align:right; }
   .two { display:grid; grid-template-columns:1fr 1fr; gap:16px; }
   label { display:block; font-size:12.5px; color:var(--dim); margin-bottom:6px; }
-  textarea, input[type=text] {
+  textarea, input[type=text], input[type=number] {
     width:100%; background:#11141a; color:var(--text);
     border:1px solid var(--line); border-radius:9px; padding:10px 12px;
     font:12.5px/1.7 ui-monospace,Consolas,monospace;
@@ -85,6 +85,21 @@
   .pitem { border:1px solid var(--line); border-radius:10px; padding:10px 12px; }
   .pitem b { font-size:13px; }
   .pitem .meta { display:block; margin-top:2px; }
+
+  /* ---- capability degradation: unavailable panels grey out ---- */
+  .panel.unavailable { opacity:.5; }
+  .panel.unavailable button,
+  .panel.unavailable input,
+  .panel.unavailable select,
+  .panel.unavailable textarea { pointer-events:none; }
+  .panel-off {
+    display:block; margin:0 0 12px; padding:9px 12px; border-radius:8px;
+    background:#2a2016; border:1px solid #6b4a1f; color:var(--warn); font-size:12.5px;
+    opacity:1; pointer-events:auto;
+  }
+  button.cap-off, input.cap-off, select.cap-off, textarea.cap-off { opacity:.35; pointer-events:none; }
+  .cap-ok { color:var(--ok); }
+  .cap-nope { color:var(--warn); }
 </style>
 </head>
 <body>
@@ -92,8 +107,8 @@
   <h1>QQNT Bot 控制台</h1>
   <span id="msg"></span>
   <div class="spacer"></div>
-  <button class="primary" onclick="act('start')">启动全部</button>
-  <button class="danger" onclick="act('stop')">停止全部</button>
+  <button class="primary" data-cap="scripts" onclick="act('start')">启动全部</button>
+  <button class="danger" data-cap="scripts" onclick="act('stop')">停止全部</button>
   <button onclick="refresh()">刷新</button>
 </header>
 
@@ -124,7 +139,7 @@
     <div class="procs" id="procs"></div>
   </div>
 
-  <div class="panel wide">
+  <div class="panel wide" data-caps="memdb,botdb,embedding">
     <h2>手动加记忆</h2>
     <div class="hint">勾选最近群聊里的消息，直接存成长期记忆（会走向量去重）</div>
     <div id="ltmList" style="max-height:280px;overflow:auto;margin-top:8px"><span class="hint">加载中…</span></div>
@@ -134,16 +149,16 @@
     </div>
   </div>
 
-  <div class="panel">
+  <div class="panel" data-caps="memdb">
     <h2>最近记住的事 <button style="float:right;padding:3px 9px;font-size:11.5px" onclick="clearAllMemories()">清空全部</button></h2>
     <ul id="memlist"><li class="empty">加载中…</li></ul>
   </div>
-  <div class="panel">
+  <div class="panel" data-caps="botdb">
     <h2>最近对话</h2>
     <ul id="chatlist"><li class="empty">加载中…</li></ul>
   </div>
 
-  <div class="panel wide">
+  <div class="panel wide" data-caps="config">
     <h2>触发权限</h2>
     <div class="two">
       <div>
@@ -211,7 +226,7 @@
     <div class="hint">记忆质量基本由这段提示词决定；觉得记了莫名其妙的东西，就把“不收”那几条写狠一点</div>
   </div>
 
-  <div class="panel wide">
+  <div class="panel wide" data-caps="config">
     <h2>审查 · 额度 · 省 token（第三方模式生效）</h2>
     <div class="hint" id="guardMode">加载中…</div>
     <div class="two" style="margin-top:12px">
@@ -288,13 +303,13 @@
         </div>
       </div>
       <div style="margin-top:10px">
-        <button onclick="testJudge()">试一下</button>
+        <button data-cap="judge" onclick="testJudge()">试一下</button>
         <span class="hint" id="testResult"></span>
       </div>
     </div>
   </div>
 
-  <div class="panel wide">
+  <div class="panel wide" data-caps="config">
     <h2>判官与思维链</h2>
     <div style="display:grid;gap:14px;margin-top:6px">
       <label style="display:flex;align-items:center;gap:10px;color:var(--text)">
@@ -368,7 +383,7 @@
     </div>
   </div>
 
-  <div class="panel wide">
+  <div class="panel wide" data-caps="config">
     <h2>模型采样参数（保存后自动重启 AstrBot，约 10 秒）</h2>
     <div style="display:grid;gap:16px;margin-top:6px">
       <div>
@@ -399,13 +414,13 @@
     </div>
   </div>
 
-  <div class="panel wide">
+  <div class="panel wide" data-caps="botdb">
     <h2>对话上下文 <button style="float:right;padding:3px 9px;font-size:11.5px" onclick="clearAllContexts()">全部清空</button></h2>
     <div id="ctxList" class="hint">加载中…</div>
     <div class="hint">人格改了但回复还怪，多半是旧对话在带节奏；清空后下一条消息会开新对话</div>
   </div>
 
-  <div class="panel wide">
+  <div class="panel wide" data-caps="config,botdb">
     <h2>自动接话开关（按群，关掉后只有 @ 才回）</h2>
     <div class="plist" id="autoList"><span class="hint">加载中…</span></div>
     <div style="margin-top:10px">
@@ -414,7 +429,7 @@
     </div>
   </div>
 
-  <div class="panel wide">
+  <div class="panel wide" data-caps="models">
     <h2>主模型（切换后自动重启 AstrBot，约 10 秒）</h2>
     <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
       <select id="modelSel" style="flex:1;min-width:260px;background:#11141a;color:var(--text);border:1px solid var(--line);border-radius:9px;padding:9px 12px;font-size:13px">
@@ -434,8 +449,8 @@
       <button id="vmOff" onclick="setVisionMode('off')">关闭读图</button>
     </div>
     <div style="margin-top:16px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-      <button onclick="vlControl('start')">启动本地 VL</button>
-      <button onclick="vlControl('stop')">停止本地 VL</button>
+      <button data-cap="vl" onclick="vlControl('start')">启动本地 VL</button>
+      <button data-cap="vl" onclick="vlControl('stop')">停止本地 VL</button>
       <span class="hint" id="vmMsg"></span>
     </div>
     <div class="hint" style="margin-top:10px">
@@ -444,7 +459,7 @@
     </div>
   </div>
 
-  <div class="panel wide">
+  <div class="panel wide" data-caps="caption">
     <h2>图片理解（OCR + 哈希缓存 + 群图上下文）</h2>
     <div class="two">
       <div>
@@ -462,13 +477,13 @@
     </div>
   </div>
 
-  <div class="panel wide">
+  <div class="panel wide" data-caps="plugins">
     <h2>已装模块</h2>
     <div class="plist" id="plist"><span class="hint">加载中…</span></div>
     <div class="hint">模块开发说明见 <code>docs\MODULE-GUIDE.md</code></div>
   </div>
 
-  <div class="panel wide">
+  <div class="panel wide" data-caps="logs">
     <h2>运行日志</h2>
     <div class="logbar">
       <button class="tab active" data-src="astrbot" onclick="pickLog(this)">AstrBot</button>
@@ -481,71 +496,189 @@
 </div>
 
 <script>
+/* ============ initial state ============ */
 const esc = s => (s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c]));
 let logSrc = 'astrbot';
+const CAPS = {};   // name -> {available, reason}; filled by /api/capabilities
 
+/* ============ capability degradation helpers ============
+   Missing/unknown capability => treat as available (legacy backend), but
+   a failed fetch still greys out the panel it belongs to. */
+function capOk(name) {
+  return !(name in CAPS) || !!CAPS[name].available;
+}
+function capReason(name) {
+  return (CAPS[name] && CAPS[name].reason) || '所需接口不可用';
+}
+function panelOf(el) {
+  if (!el) return null;
+  const node = typeof el === 'string' ? document.getElementById(el) : el;
+  return node ? node.closest('.panel') : null;
+}
+function disablePanel(el, reason) {
+  if (!el) return;
+  el.classList.add('unavailable');
+  let note = el.querySelector(':scope > .panel-off');
+  if (!note) {
+    note = document.createElement('div');
+    note.className = 'panel-off';
+    el.insertBefore(note, el.firstChild);
+  }
+  note.textContent = '⚠ 不可用：' + reason;
+  el.querySelectorAll('button,input,select,textarea').forEach(x => {
+    if (x.dataset.capLock !== '1') {
+      x.dataset.capLock = '1';
+      x.dataset.capPrev = x.disabled ? '1' : '';
+    }
+    x.disabled = true;
+  });
+}
+function enablePanel(el) {
+  if (!el) return;
+  el.classList.remove('unavailable');
+  const note = el.querySelector(':scope > .panel-off');
+  if (note) note.remove();
+  el.querySelectorAll('button,input,select,textarea').forEach(x => {
+    if (x.dataset.capLock === '1') {
+      if (!x.dataset.capPrev) x.disabled = false;
+      delete x.dataset.capLock;
+      delete x.dataset.capPrev;
+    }
+  });
+}
+async function api(url, opts) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), 9000);
+  try {
+    const resp = await fetch(url, Object.assign({}, opts || {}, {signal: ctl.signal}));
+    if (!resp.ok) throw new Error('HTTP ' + resp.status);
+    if (!(resp.headers.get('content-type') || '').includes('json')) {
+      throw new Error('接口没有返回 JSON');
+    }
+    return {ok:true, data:await resp.json()};
+  } catch (e) {
+    return {ok:false, error: e && e.name === 'AbortError' ? '请求超时' : String((e && e.message) || e)};
+  } finally {
+    clearTimeout(timer);
+  }
+}
+async function post(url, body) {
+  return api(url, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+}
+function say(id, text) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = text;
+}
+function fail(r, panelId, hintId) {
+  say(hintId, r.error);
+  disablePanel(panelOf(panelId), r.error);
+}
+
+/* ============ capability probe ============ */
+async function loadCapabilities() {
+  const r = await api('/api/capabilities');
+  if (r.ok && r.data) Object.assign(CAPS, r.data);
+  applyCapabilities();
+}
+function applyCapabilities() {
+  document.querySelectorAll('.panel[data-caps]').forEach(p => {
+    const need = (p.dataset.caps || '').split(',').map(s => s.trim()).filter(Boolean);
+    const missing = need.filter(n => !capOk(n));
+    if (missing.length) {
+      disablePanel(p, missing.map(n => n + '：' + capReason(n)).join('；'));
+    } else {
+      enablePanel(p);
+    }
+  });
+  document.querySelectorAll('[data-cap]').forEach(el => {
+    const n = el.dataset.cap;
+    const off = !capOk(n);
+    el.disabled = off;
+    el.classList.toggle('cap-off', off);
+    el.title = off ? capReason(n) : '';
+  });
+}
+
+/* ============ shared widgets ============ */
 function setBar(id, pct, warnAbove) {
   const bar = document.getElementById(id);
+  if (!bar) return;
   bar.querySelector('i').style.width = Math.min(100, pct) + '%';
   bar.classList.toggle('warn', pct >= warnAbove);
 }
 
+/* ============ status / system / memories / chats ============ */
 async function refresh() {
-  try {
-    const st = await (await fetch('/api/status')).json();
-    document.getElementById('pills').innerHTML = st.components.map(c =>
+  const st = await api('/api/status');
+  if (!st.ok) {
+    say('msg', '后台服务没起来（6190）');
+  } else {
+    const d = st.data;
+    document.getElementById('pills').innerHTML = d.components.map(c =>
       `<div class="pill"><span class="dot ${c.up ? 'on' : ''}"></span>${c.label}<span style="color:#8b93a3">:${c.port}</span></div>`
     ).join('');
-    document.getElementById('mem').textContent = st.memories;
+    document.getElementById('mem').textContent = d.memories;
     document.getElementById('idle').textContent =
-      st.activity.idle_min === null ? '–' : st.activity.idle_min + ' 分钟前';
+      d.activity.idle_min === null ? '–' : d.activity.idle_min + ' 分钟前';
+  }
 
-    const sys = await (await fetch('/api/system')).json();
-    document.getElementById('cpuTxt').textContent = sys.cpu + '%';
-    setBar('cpuBar', sys.cpu, 85);
-    document.getElementById('ramTxt').textContent = sys.mem_used_gb + ' / ' + sys.mem_total_gb + ' GB';
-    setBar('ramBar', sys.mem_percent, 85);
-    const diskPct = (sys.disk_total_gb - sys.disk_free_gb) / sys.disk_total_gb * 100;
-    document.getElementById('diskTxt').textContent = sys.disk_free_gb + ' GB 空闲';
+  const sys = await api('/api/system');
+  if (!sys.ok) {
+    disablePanel(panelOf('cpuBar'), sys.error);
+  } else {
+    const s = sys.data;
+    document.getElementById('cpuTxt').textContent = s.cpu + '%';
+    setBar('cpuBar', s.cpu, 85);
+    document.getElementById('ramTxt').textContent = s.mem_used_gb + ' / ' + s.mem_total_gb + ' GB';
+    setBar('ramBar', s.mem_percent, 85);
+    const diskPct = (s.disk_total_gb - s.disk_free_gb) / s.disk_total_gb * 100;
+    document.getElementById('diskTxt').textContent = s.disk_free_gb + ' GB 空闲';
     setBar('diskBar', diskPct, 90);
-    document.getElementById('procs').innerHTML = sys.procs.map(p =>
+    document.getElementById('procs').innerHTML = s.procs.map(p =>
       `<span>${esc(p.label)}</span><span>${p.rss_mb} MB</span><span>${p.uptime_min} 分钟</span>`
     ).join('') || '<span class="hint">没有相关进程</span>';
+  }
 
-    const mem = await (await fetch('/api/memories?t=' + Date.now())).json();
-    document.getElementById('memlist').innerHTML = mem.items.length
-      ? mem.items.map(m => `<li style="display:flex;gap:8px;align-items:flex-start">
+  const mem = await api('/api/memories?t=' + Date.now());
+  if (!mem.ok) {
+    fail(mem, 'memlist', null);
+  } else {
+    document.getElementById('memlist').innerHTML = mem.data.items.length
+      ? mem.data.items.map(m => `<li style="display:flex;gap:8px;align-items:flex-start">
           <span style="flex:1"><span class="meta">${esc(m.at)} · QQ ${esc(m.uid)}</span>${esc(m.text)}</span>
           <button style="padding:2px 8px;font-size:11px;flex:none" onclick="delMemory(${m.id})">删</button>
         </li>`).join('')
       : '<li class="empty">还没有记忆</li>';
+  }
 
-    const chats = await (await fetch('/api/chats')).json();
-    document.getElementById('chatlist').innerHTML = chats.items.length
-      ? chats.items.map(c => `<li>
+  const chats = await api('/api/chats');
+  if (!chats.ok) {
+    fail(chats, 'chatlist', null);
+  } else {
+    document.getElementById('chatlist').innerHTML = chats.data.items.length
+      ? chats.data.items.map(c => `<li>
           <span class="meta">${esc(c.at)} · ${c.scope}</span><br>
           <span style="color:#8b93a3">你：</span>${esc(c.user)}<br>
           <span class="bot">它：</span>${esc(c.bot)}
         </li>`).join('')
       : '<li class="empty">还没有对话</li>';
-
-    await refreshLog();
-  } catch (e) {
-    document.getElementById('msg').textContent = '后台服务没起来（6190）';
   }
+
+  await refreshLog();
 }
 
 async function refreshLog() {
-  try {
-    const r = await (await fetch('/api/logs?src=' + logSrc + '&lines=120')).json();
-    const box = document.getElementById('logBox');
-    const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
-    box.textContent = r.lines.join('\n');
-    if (atBottom) box.scrollTop = box.scrollHeight;
-    document.getElementById('logHint').textContent = new Date().toLocaleTimeString();
-  } catch (e) {}
+  const r = await api('/api/logs?src=' + logSrc + '&lines=120');
+  if (!r.ok) {
+    say('logHint', '接口不可用：' + r.error);
+    return;
+  }
+  const box = document.getElementById('logBox');
+  const atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+  box.textContent = r.data.lines.join('\n');
+  if (atBottom) box.scrollTop = box.scrollHeight;
+  say('logHint', new Date().toLocaleTimeString());
 }
-
 function pickLog(btn) {
   document.querySelectorAll('button.tab').forEach(b => b.classList.remove('active'));
   btn.classList.add('active');
@@ -553,39 +686,36 @@ function pickLog(btn) {
   refreshLog();
 }
 
+/* ============ access / water ============ */
 async function loadAccess() {
-  try {
-    const a = await (await fetch('/api/access')).json();
-    document.getElementById('groups').value = a.groups.join('\n');
-    document.getElementById('friends').value = a.friends.join('\n');
-    document.getElementById('known').innerHTML = (a.known || []).map(g =>
-      `<span class="chip" onclick="addGroup('${g.id}')">${g.id} · ${g.count}条 · ${esc(g.last)}</span>`
-    ).join('') || '<span class="hint">还没见过任何群消息</span>';
-  } catch (e) {}
+  const r = await api('/api/access');
+  if (!r.ok) { fail(r, 'groups', 'accessMsg'); return; }
+  const a = r.data;
+  document.getElementById('groups').value = (a.groups || []).join('\n');
+  document.getElementById('friends').value = (a.friends || []).join('\n');
+  document.getElementById('known').innerHTML = (a.known || []).map(g =>
+    `<span class="chip" onclick="addGroup('${g.id}')">${g.id} · ${g.count}条 · ${esc(g.last)}</span>`
+  ).join('') || '<span class="hint">还没见过任何群消息</span>';
 }
-
 function addGroup(id) {
   const box = document.getElementById('groups');
   const list = box.value.split('\n').map(s => s.trim()).filter(Boolean);
   if (!list.includes(id)) list.push(id);
   box.value = list.join('\n');
 }
-
 async function saveAccess() {
   const groups = document.getElementById('groups').value.split('\n').map(s => s.trim()).filter(Boolean);
   const friends = document.getElementById('friends').value.split('\n').map(s => s.trim()).filter(Boolean);
-  document.getElementById('accessMsg').textContent = '保存中…';
-  const r = await (await fetch('/api/access', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({groups, friends})
-  })).json();
-  document.getElementById('accessMsg').textContent = r.msg || '已保存';
+  say('accessMsg', '保存中…');
+  const r = await post('/api/access', {groups, friends});
+  if (!r.ok) { fail(r, 'groups', 'accessMsg'); return; }
+  say('accessMsg', r.data.msg || '已保存');
   setTimeout(refresh, 6000);
 }
-
 async function loadWater() {
-  const r = await (await fetch('/api/water')).json();
-  document.getElementById('waterList').innerHTML = r.items.map(w => `
+  const r = await api('/api/water');
+  if (!r.ok) { fail(r, 'waterList', 'waterMsg'); return; }
+  document.getElementById('waterList').innerHTML = r.data.items.map(w => `
     <div class="pitem" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <label style="margin:0;display:flex;align-items:center;gap:8px;color:var(--text)">
         <input type="checkbox" data-gid="${w.id}" ${w.enabled ? 'checked' : ''}>
@@ -597,219 +727,182 @@ async function loadWater() {
       </span>
     </div>`).join('') || '<span class="hint">还没有可用群</span>';
 }
-
 async function saveWater() {
   const items = [...document.querySelectorAll('#waterList input[type=checkbox]')].map(cb => {
     const idle = document.querySelector(`#waterList input[data-idle="${cb.dataset.gid}"]`);
     return { id: cb.dataset.gid, enabled: cb.checked, idle_min: Number(idle && idle.value) || 90 };
   });
-  document.getElementById('waterMsg').textContent = '保存中…';
-  const r = await (await fetch('/api/water', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({items})
-  })).json();
-  document.getElementById('waterMsg').textContent = r.msg || '已保存';
+  say('waterMsg', '保存中…');
+  const r = await post('/api/water', {items});
+  say('waterMsg', r.ok ? (r.data.msg || '已保存') : r.error);
 }
 
+/* ============ persona ============ */
 async function loadPersona() {
-  const r = await (await fetch('/api/persona')).json();
-  document.getElementById('persona').value = r.text || '';
+  const r = await api('/api/persona');
+  if (!r.ok) { fail(r, 'persona', 'personaMsg'); return; }
+  document.getElementById('persona').value = r.data.text || '';
 }
-
 async function savePersona() {
-  const text = document.getElementById('persona').value;
-  document.getElementById('personaMsg').textContent = '保存中…';
-  const r = await (await fetch('/api/persona', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({text})
-  })).json();
-  document.getElementById('personaMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+  say('personaMsg', '保存中…');
+  const r = await post('/api/persona', {text:document.getElementById('persona').value});
+  if (!r.ok) { fail(r, 'persona', 'personaMsg'); return; }
+  say('personaMsg', r.data.msg || (r.data.ok ? '已保存' : '失败'));
 }
 
+/* ============ judge ============ */
 async function loadJudge() {
-  const j = await (await fetch('/api/judge')).json();
+  const r = await api('/api/judge');
+  if (!r.ok) { fail(r, 'judgePrompt', 'judgeMsg'); return; }
+  const j = r.data;
   document.getElementById('judgePrompt').value = j.prompt || '';
   document.getElementById('judgeForce').value = (j.force_reply || []).join('\n');
   document.getElementById('judgeIgnore').value = (j.ignore || []).join('\n');
 }
-
 function lines(id) {
   return document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
 }
-
 async function saveJudge() {
-  document.getElementById('judgeMsg').textContent = '保存中…';
-  const r = await (await fetch('/api/judge', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      prompt: document.getElementById('judgePrompt').value,
-      force_reply: lines('judgeForce'),
-      ignore: lines('judgeIgnore')
-    })
-  })).json();
-  document.getElementById('judgeMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+  say('judgeMsg', '保存中…');
+  const r = await post('/api/judge', {
+    prompt: document.getElementById('judgePrompt').value,
+    force_reply: lines('judgeForce'),
+    ignore: lines('judgeIgnore')
+  });
+  if (!r.ok) { fail(r, 'judgePrompt', 'judgeMsg'); return; }
+  say('judgeMsg', r.data.msg || (r.data.ok ? '已保存' : '失败'));
 }
-
 async function testJudge() {
-  const box = document.getElementById('testResult');
-  box.textContent = '判定中…';
-  const r = await (await fetch('/api/judge/test', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      message: document.getElementById('testMsg').value,
-      recent: document.getElementById('testRecent').value
-    })
-  })).json();
-  if (r.ok === false) { box.textContent = r.msg; return; }
-  const yes = String(r.verdict).startsWith('1');
-  box.innerHTML = `<span class="${yes ? 'v-yes' : 'v-no'}">${yes ? '会接话' : '不接'}</span>`
-    + ` · 判官输出 ${esc(r.verdict)} · ${esc(r.source)} · ${r.ms}ms`;
+  if (!capOk('judge')) { say('testResult', '判官服务未启动，无法试判'); return; }
+  say('testResult', '判定中…');
+  const r = await post('/api/judge/test', {
+    message: document.getElementById('testMsg').value,
+    recent: document.getElementById('testRecent').value
+  });
+  if (!r.ok) { say('testResult', r.error); return; }
+  if (r.data.ok === false) { say('testResult', r.data.msg); return; }
+  const yes = String(r.data.verdict).startsWith('1');
+  document.getElementById('testResult').innerHTML =
+    `<span class="${yes ? 'v-yes' : 'v-no'}">${yes ? '会接话' : '不接'}</span>`
+    + ` · 判官输出 ${esc(r.data.verdict)} · ${esc(r.data.source)} · ${r.data.ms}ms`;
 }
 
+/* ============ memories delete ============ */
 async function delMemory(id) {
   if (!confirm('删掉这条记忆？')) return;
-  const r = await (await fetch('/api/memories/delete', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({ids: [id]})
-  })).json();
-  if (!r.ok) { alert(r.msg); return; }
-  document.getElementById('msg').textContent = r.msg;
-  setTimeout(() => document.getElementById('msg').textContent = '', 4000);
+  const r = await post('/api/memories/delete', {ids:[id]});
+  if (!r.ok) { alert(r.error); return; }
+  if (!r.data.ok) { alert(r.data.msg); return; }
+  say('msg', r.data.msg);
+  setTimeout(() => say('msg', ''), 4000);
   refresh();
 }
-
 async function clearAllMemories() {
   if (!confirm('清空全部记忆？这个不可恢复')) return;
-  const r = await (await fetch('/api/memories/delete', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({all: true})
-  })).json();
-  alert(r.msg || 'done');
+  const r = await post('/api/memories/delete', {all:true});
+  alert(r.ok ? (r.data.msg || 'done') : r.error);
   refresh();
 }
 
-
-
-
+/* ============ profile ============ */
 async function loadProfile() {
   try {
-    const r = await (await fetch('/api/profile?t=' + Date.now())).json();
-    document.getElementById('profileMode').textContent =
-      '当前模式：' + (r.mode === 'third_party' ? '第三方 API' : '本地模型') +
-      ' · 表情概率 ' + Math.round(r.meme_chance * 100) + '%' +
-      ' · 文本规则 ' + r.rule_count + ' 条';
-    document.getElementById('profMeme').checked = !!r.meme_on;
-    document.getElementById('profRules').checked = !!r.rules_on;
-    document.getElementById('profMemeMeta').textContent = r.meme_on ? '（已开）' : '（已关）';
-    document.getElementById('profRulesMeta').textContent = r.rules_on ? '（' + r.rule_count + ' 条）' : '（已关）';
-    greyLocalControls(!!r.meme_on, !!r.rules_on);
+    const r = await api('/api/profile?t=' + Date.now());
+    if (!r.ok) { say('profileMode', '接口不可用：' + r.error); return; }
+    const p = r.data;
+    say('profileMode',
+      '当前模式：' + (p.mode === 'third_party' ? '第三方 API' : '本地模型') +
+      ' · 表情概率 ' + Math.round(p.meme_chance * 100) + '%' +
+      ' · 文本规则 ' + p.rule_count + ' 条');
+    document.getElementById('profMeme').checked = !!p.meme_on;
+    document.getElementById('profRules').checked = !!p.rules_on;
+    say('profMemeMeta', p.meme_on ? '（已开）' : '（已关）');
+    say('profRulesMeta', p.rules_on ? '（' + p.rule_count + ' 条）' : '（已关）');
+    greyLocalControls(!!p.meme_on, !!p.rules_on);
   } catch (e) { console.error('loadProfile', e); }
 }
-
 async function applyProfile(preset) {
-  document.getElementById('profileMsg').textContent = '应用中…';
-  const r = await (await fetch('/api/profile', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({preset})
-  })).json();
-  document.getElementById('profileMsg').textContent = r.msg || (r.ok ? '已应用' : '失败');
+  say('profileMsg', '应用中…');
+  const r = await post('/api/profile', {preset});
+  if (!r.ok) { say('profileMsg', r.error); return; }
+  say('profileMsg', r.data.msg || (r.data.ok ? '已应用' : '失败'));
   loadProfile(); loadReply();
-  const api = document.getElementById('profileMode').textContent.includes('第三方');
-  greyLocalControls(document.getElementById('profMeme').checked,
-                    document.getElementById('profRules').checked);
 }
-
 async function toggleProfile(which) {
   const body = which === 'meme'
     ? {meme_on: document.getElementById('profMeme').checked}
     : {rules_on: document.getElementById('profRules').checked};
-  const r = await (await fetch('/api/profile', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body)
-  })).json();
-  document.getElementById('profileMsg').textContent = r.msg || '已更新';
+  const r = await post('/api/profile', body);
+  say('profileMsg', r.ok ? (r.data.msg || '已更新') : r.error);
   loadProfile(); loadReply();
 }
 
+/* ============ LTM prompt ============ */
 async function loadLtmPrompt() {
-  try {
-    const r = await (await fetch('/api/ltm/prompt?t=' + Date.now())).json();
-    document.getElementById('ltmPrompt').value = r.text || '';
-    if (!r.has_placeholders) {
-      document.getElementById('ltmPromptMsg').textContent = '警告：缺少占位符，提取会失败';
-    }
-  } catch (e) { console.error('loadLtmPrompt', e); }
+  const r = await api('/api/ltm/prompt?t=' + Date.now());
+  if (!r.ok) { say('ltmPromptMsg', '接口不可用：' + r.error); return; }
+  document.getElementById('ltmPrompt').value = r.data.text || '';
+  if (!r.data.has_placeholders) say('ltmPromptMsg', '警告：缺少占位符，提取会失败');
 }
-
 async function saveLtmPrompt() {
-  const text = document.getElementById('ltmPrompt').value;
-  document.getElementById('ltmPromptMsg').textContent = '保存中…';
-  const r = await (await fetch('/api/ltm/prompt', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({text})
-  })).json();
-  document.getElementById('ltmPromptMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+  say('ltmPromptMsg', '保存中…');
+  const r = await post('/api/ltm/prompt', {text:document.getElementById('ltmPrompt').value});
+  if (!r.ok) { say('ltmPromptMsg', r.error); return; }
+  say('ltmPromptMsg', r.data.msg || (r.data.ok ? '已保存' : '失败'));
 }
 
+/* ============ vision mode / VL control ============ */
 async function loadVisionMode() {
-  try {
-    const r = await (await fetch('/api/visionmode?t=' + Date.now())).json();
-    const names = {local:'本地 VL 读图', third_party:'第三方看图', off:'关闭读图'};
-    document.getElementById('vmState').textContent =
-      '当前：' + (names[r.mode] || r.mode) +
-      ' · 本地 VL ' + (r.up ? '在线' : '离线') +
-      ' · 模型 ' + r.model + ' · 端口 ' + r.port +
-      ' · 主模型模式 ' + (r.api_mode === 'third_party' ? '第三方' : '本地');
-    for (const [id, mode] of [['vmLocal','local'],['vmApi','third_party'],['vmOff','off']]) {
-      const btn = document.getElementById(id);
-      const active = r.mode === mode;
-      btn.className = active ? 'primary' : '';
-      btn.style.opacity = active ? 1 : 0.75;
-    }
-  } catch (e) { console.error('loadVisionMode', e); }
+  const r = await api('/api/visionmode?t=' + Date.now());
+  if (!r.ok) { say('vmState', '接口不可用：' + r.error); return; }
+  const v = r.data;
+  const names = {local:'本地 VL 读图', third_party:'第三方看图', off:'关闭读图'};
+  say('vmState',
+    '当前：' + (names[v.mode] || v.mode) +
+    ' · 本地 VL ' + (v.up ? '在线' : '离线') +
+    ' · 模型 ' + v.model + ' · 端口 ' + v.port +
+    ' · 主模型模式 ' + (v.api_mode === 'third_party' ? '第三方' : '本地'));
+  for (const [id, mode] of [['vmLocal','local'],['vmApi','third_party'],['vmOff','off']]) {
+    const btn = document.getElementById(id);
+    const active = v.mode === mode;
+    btn.className = active ? 'primary' : '';
+    btn.style.opacity = active ? 1 : 0.75;
+  }
 }
-
 async function setVisionMode(mode) {
-  const r = await (await fetch('/api/visionmode', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({mode})
-  })).json();
-  document.getElementById('vmMsg').textContent = r.msg || (r.ok ? '已切换' : '失败');
-  loadVisionMode();
-loadProfile();
-loadLtmPrompt();
+  const r = await post('/api/visionmode', {mode});
+  say('vmMsg', r.ok ? (r.data.msg || '已切换') : r.error);
+  loadVisionMode(); loadProfile(); loadLtmPrompt();
 }
-
 async function vlControl(action) {
-  document.getElementById('vmMsg').textContent = action === 'start' ? '启动中…' : '停止中…';
-  const r = await (await fetch('/api/vl/' + action, {method: 'POST'})).json();
-  document.getElementById('vmMsg').textContent = r.msg || (r.ok ? '完成' : '失败');
+  if (!capOk('vl')) { say('vmMsg', '本地读图服务未启动'); return; }
+  say('vmMsg', action === 'start' ? '启动中…' : '停止中…');
+  const r = await api('/api/vl/' + action, {method:'POST'});
+  say('vmMsg', r.ok ? (r.data.msg || '完成') : r.error);
   setTimeout(loadVisionMode, 1500);
 }
 
+/* ============ guard ============ */
 async function loadGuard() {
-  try {
-    const r = await (await fetch('/api/guard?t=' + Date.now())).json();
-    const modeText = r.mode === 'third_party'
-      ? '当前模式：第三方 API（审查与额度生效）'
-      : '当前模式：本地模型（审查与额度不生效）';
-    document.getElementById('guardMode').textContent = modeText;
-    const groups = r.groups || [];
-    document.getElementById('reviewList').innerHTML = groups.length
-      ? groups.map(g => `<label style="display:flex;gap:8px;align-items:center;padding:4px 0;color:var(--text)">
-          <input type="checkbox" class="reviewPick" data-gid="${esc(g)}" ${r.review_groups[g] ? 'checked' : ''}>
-          <span>${esc(g)}</span></label>`).join('')
-      : '<span class="hint">白名单里还没有群</span>';
-    document.getElementById('quotaBox').value = r.daily_limit || 0;
-    const used = r.used || {};
-    document.getElementById('quotaUsed').textContent =
-      '今日已用 ' + (used.tokens || 0) + ' tokens' + (used.date ? '（' + used.date + '）' : '');
-    document.getElementById('saveTokenBox').checked = !!r.save_token;
-    document.getElementById('histKeep').value = r.history_keep || 10;
-    document.getElementById('histKeepVal').textContent = (r.history_keep || 10) + ' 条';
-  } catch (e) { console.error('loadGuard', e); }
+  const r = await api('/api/guard?t=' + Date.now());
+  if (!r.ok) { say('guardMode', '接口不可用：' + r.error); return; }
+  const g = r.data;
+  say('guardMode', g.mode === 'third_party'
+    ? '当前模式：第三方 API（审查与额度生效）'
+    : '当前模式：本地模型（审查与额度不生效）');
+  const groups = g.groups || [];
+  document.getElementById('reviewList').innerHTML = groups.length
+    ? groups.map(x => `<label style="display:flex;gap:8px;align-items:center;padding:4px 0;color:var(--text)">
+        <input type="checkbox" class="reviewPick" data-gid="${esc(x)}" ${g.review_groups[x] ? 'checked' : ''}>
+        <span>${esc(x)}</span></label>`).join('')
+    : '<span class="hint">白名单里还没有群</span>';
+  document.getElementById('quotaBox').value = g.daily_limit || 0;
+  const used = g.used || {};
+  say('quotaUsed', '今日已用 ' + (used.tokens || 0) + ' tokens' + (used.date ? '（' + used.date + '）' : ''));
+  document.getElementById('saveTokenBox').checked = !!g.save_token;
+  document.getElementById('histKeep').value = g.history_keep || 10;
+  say('histKeepVal', (g.history_keep || 10) + ' 条');
 }
-
 async function saveGuardConfig() {
   const review = {};
   document.querySelectorAll('.reviewPick').forEach(c => { review[c.dataset.gid] = c.checked; });
@@ -819,85 +912,69 @@ async function saveGuardConfig() {
     save_token: document.getElementById('saveTokenBox').checked,
     history_keep: parseInt(document.getElementById('histKeep').value, 10)
   };
-  document.getElementById('guardMsg').textContent = '保存中…';
-  const r = await (await fetch('/api/guard', {
-    method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify(body)
-  })).json();
-  document.getElementById('guardMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+  say('guardMsg', '保存中…');
+  const r = await post('/api/guard', body);
+  say('guardMsg', r.ok ? (r.data.msg || '已保存') : r.error);
 }
 
+/* ============ thinking ============ */
 async function loadThinking() {
-  try {
-    const r = await (await fetch('/api/thinking?t=' + Date.now())).json();
-    document.getElementById('thinkBox').checked = r.enable;
-    document.getElementById('thinkBudget').value = r.budget;
-    document.getElementById('thinkBudgetVal').textContent = r.budget + ' tok';
-
-    // 第三方模式：双判官要本地 9B，按规定停用；预算改用强度档
-    const api = r.mode === 'third_party';
-    const dj = document.getElementById('dualJudgeBox');
-    dj.disabled = api;
-    dj.style.opacity = api ? 0.35 : 1;
-    if (api) {
-      dj.checked = false;
-      const slider = document.getElementById('thinkBudget');
-      slider.disabled = false;
-      slider.style.opacity = 1;
-      slider.min = 400;
-      slider.max = 2400;
-      slider.step = 100;
-      const toEffort = v => (v <= 800 ? 'low（低）' : (v <= 1500 ? 'high（中）' : 'max（高）'));
-      document.getElementById('thinkBudgetVal').textContent =
-        r.budget + ' tok ≈ ' + toEffort(r.budget);
-      slider.oninput = function () {
-        document.getElementById('thinkBudgetVal').textContent =
-          this.value + ' tok ≈ ' + toEffort(parseInt(this.value, 10));
-      };
-    }
-  } catch (e) { console.error(e); }
+  const r = await api('/api/thinking?t=' + Date.now());
+  if (!r.ok) { say('thinkMsg', '接口不可用：' + r.error); return; }
+  const t = r.data;
+  document.getElementById('thinkBox').checked = t.enable;
+  document.getElementById('thinkBudget').value = t.budget;
+  say('thinkBudgetVal', t.budget + ' tok');
+  const apiMode = t.mode === 'third_party';
+  const dj = document.getElementById('dualJudgeBox');
+  dj.disabled = apiMode;
+  dj.style.opacity = apiMode ? 0.35 : 1;
+  if (apiMode) {
+    dj.checked = false;
+    const slider = document.getElementById('thinkBudget');
+    slider.disabled = false;
+    slider.style.opacity = 1;
+    slider.min = 400; slider.max = 2400; slider.step = 100;
+    const toEffort = v => (v <= 800 ? 'low（低）' : (v <= 1500 ? 'high（中）' : 'max（高）'));
+    say('thinkBudgetVal', t.budget + ' tok ≈ ' + toEffort(t.budget));
+    slider.oninput = function () {
+      say('thinkBudgetVal', this.value + ' tok ≈ ' + toEffort(parseInt(this.value, 10)));
+    };
+  }
 }
-
 async function applyThinking() {
-  const body = {
+  say('thinkMsg', '保存中…');
+  const r = await post('/api/thinking', {
     enable: document.getElementById('thinkBox').checked,
     budget: parseInt(document.getElementById('thinkBudget').value, 10)
-  };
-  document.getElementById('thinkMsg').textContent = '保存中…';
-  const r = await (await fetch('/api/thinking', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(body)
-  })).json();
-  document.getElementById('thinkMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+  });
+  say('thinkMsg', r.ok ? (r.data.msg || '已保存') : r.error);
 }
 
+/* ============ manual LTM ============ */
 async function loadLtmRecent() {
-  try {
-    const r = await (await fetch('/api/ltm/recent?limit=40&t=' + Date.now())).json();
-    document.getElementById('ltmList').innerHTML = r.items.length
-      ? r.items.map(m => `<label style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line);color:var(--text)">
-          <input type="checkbox" class="ltmPick" data-uid="${esc(m.uid)}" data-text="${esc(m.text)}" style="margin-top:3px">
-          <span style="flex:1"><span class="meta">${esc(m.at)} · QQ ${esc(m.uid)} · ${esc(m.name)}</span>${esc(m.text)}</span>
-        </label>`).join('')
-      : '<span class="hint">没有可用消息</span>';
-  } catch (e) { console.error(e); }
+  const r = await api('/api/ltm/recent?limit=40&t=' + Date.now());
+  if (!r.ok) { fail(r, 'ltmList', 'ltmMsg'); return; }
+  document.getElementById('ltmList').innerHTML = r.data.items.length
+    ? r.data.items.map(m => `<label style="display:flex;gap:8px;align-items:flex-start;padding:5px 0;border-bottom:1px solid var(--line);color:var(--text)">
+        <input type="checkbox" class="ltmPick" data-uid="${esc(m.uid)}" data-text="${esc(m.text)}" style="margin-top:3px">
+        <span style="flex:1"><span class="meta">${esc(m.at)} · QQ ${esc(m.uid)} · ${esc(m.name)}</span>${esc(m.text)}</span>
+      </label>`).join('')
+    : '<span class="hint">没有可用消息</span>';
 }
-
 async function addSelectedMemories() {
   const picked = [...document.querySelectorAll('.ltmPick:checked')].map(c => ({
     uid: c.dataset.uid, text: c.dataset.text
   }));
-  if (!picked.length) { document.getElementById('ltmMsg').textContent = '先勾选几条'; return; }
-  document.getElementById('ltmMsg').textContent = '写入中…';
-  const r = await (await fetch('/api/ltm/add', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({items: picked})
-  })).json();
-  document.getElementById('ltmMsg').textContent = r.msg || (r.ok ? '已加入' : '失败');
-  if (r.ok) refresh();
+  if (!picked.length) { say('ltmMsg', '先勾选几条'); return; }
+  say('ltmMsg', '写入中…');
+  const r = await post('/api/ltm/add', {items:picked});
+  if (!r.ok) { fail(r, 'ltmList', 'ltmMsg'); return; }
+  say('ltmMsg', r.data.msg || (r.data.ok ? '已加入' : '失败'));
+  if (r.data.ok) refresh();
 }
 
-
+/* ============ reply / local greying ============ */
 function greyLocalControls(memeOn, rulesOn) {
   const meme = document.getElementById('memeSlider');
   const rules = document.getElementById('rulesBox');
@@ -913,34 +990,30 @@ function greyLocalControls(memeOn, rulesOn) {
     rules.placeholder = rulesOn ? '' : '已关闭（在上方“本地优化”面板里打开）';
   }
 }
-
 async function loadReply() {
-  try {
-  const r = await (await fetch('/api/reply?t=' + Date.now())).json();
-  document.getElementById('replySlider').value = r.reply_chance;
-  document.getElementById('replyVal').textContent = Math.round(r.reply_chance * 100) + '%';
-  document.getElementById('dualJudgeBox').checked = !!r.dual_judge;
-  document.getElementById('budgetSlider').value = r.reply_budget || 8;
-  document.getElementById('budgetVal').textContent = (r.reply_budget || 8) + ' 条';
-  document.getElementById('summonBox').value = (r.summon || []).join(', ');
-  document.getElementById('histSlider').value = r.history_minutes || 30;
-  document.getElementById('histVal').textContent = (r.history_minutes || 30) + ' 分钟';
-  document.getElementById('memeSlider').value = r.meme_chance;
-  document.getElementById('memeVal').textContent = Math.round(r.meme_chance * 100) + '%';
-  const rules = r.text_rules || [];
-  document.getElementById('rulesBox').value = rules
-    .map(x => `${x.pattern} => ${x.to}`).join('\n');
-  greyLocalControls((r.meme_chance || 0) > 0, rules.length > 0);
-  } catch (e) { console.error('loadReply', e); }
+  const r = await api('/api/reply?t=' + Date.now());
+  if (!r.ok) { say('replyMsg', '接口不可用：' + r.error); return; }
+  const d = r.data;
+  document.getElementById('replySlider').value = d.reply_chance;
+  say('replyVal', Math.round(d.reply_chance * 100) + '%');
+  document.getElementById('dualJudgeBox').checked = !!d.dual_judge;
+  document.getElementById('budgetSlider').value = d.reply_budget || 8;
+  say('budgetVal', (d.reply_budget || 8) + ' 条');
+  document.getElementById('summonBox').value = (d.summon || []).join(', ');
+  document.getElementById('histSlider').value = d.history_minutes || 30;
+  say('histVal', (d.history_minutes || 30) + ' 分钟');
+  document.getElementById('memeSlider').value = d.meme_chance;
+  say('memeVal', Math.round(d.meme_chance * 100) + '%');
+  const rules = d.text_rules || [];
+  document.getElementById('rulesBox').value = rules.map(x => `${x.pattern} => ${x.to}`).join('\n');
+  greyLocalControls((d.meme_chance || 0) > 0, rules.length > 0);
 }
-
 async function applyReply() {
-  const el = (id) => document.getElementById(id);
+  const el = id => document.getElementById(id);
   const chance = parseFloat((el('memeSlider') || {}).value || 0.3);
   const replyChance = parseFloat((el('replySlider') || {}).value || 1);
   const historyMinutes = parseFloat((el('histSlider') || {}).value || 30);
-  const summon = ((el('summonBox') || {}).value || '')
-    .split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
+  const summon = ((el('summonBox') || {}).value || '').split(/[,，\s]+/).map(x => x.trim()).filter(Boolean);
   const rules = ((el('rulesBox') || {}).value || '').split('\n')
     .map(line => line.trim()).filter(Boolean)
     .map(line => {
@@ -948,25 +1021,19 @@ async function applyReply() {
       if (i < 0) return null;
       const pattern = line.slice(0, i).trim();
       const to = line.slice(i + 2).trim();
-      return pattern ? { pattern, to } : null;
+      return pattern ? {pattern, to} : null;
     }).filter(Boolean);
-  el('replyMsg').textContent = '保存中…';
-  const r = await (await fetch('/api/reply', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({
-      meme_chance: chance,
-      reply_chance: replyChance,
-      history_minutes: historyMinutes,
-      reply_budget: parseInt((el('budgetSlider') || {}).value || 8, 10),
-      dual_judge: !!(el('dualJudgeBox') || {}).checked,
-      summon: summon,
-      text_rules: rules
-    })
-  })).json();
-  el('replyMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+  say('replyMsg', '保存中…');
+  const r = await post('/api/reply', {
+    meme_chance: chance, reply_chance: replyChance,
+    history_minutes: historyMinutes,
+    reply_budget: parseInt((el('budgetSlider') || {}).value || 8, 10),
+    dual_judge: !!(el('dualJudgeBox') || {}).checked,
+    summon, text_rules: rules
+  });
+  say('replyMsg', r.ok ? (r.data.msg || '已保存') : r.error);
   loadReply();
 }
-
 function fillDefaultRule() {
   const box = document.getElementById('rulesBox');
   if (!box) return;
@@ -974,82 +1041,64 @@ function fillDefaultRule() {
   box.value = box.value.trim() ? box.value + '\n' + line : line;
 }
 
+/* ============ sampling ============ */
 async function loadSampling() {
-  try {
-    const r = await (await fetch('/api/sampling?t=' + Date.now())).json();
-    document.getElementById('tempSlider').value = r.temperature;
-    document.getElementById('rpSlider').value = r.repeat_penalty;
-    document.getElementById('mtSlider').value = r.max_tokens;
-    document.getElementById('tempVal').textContent = r.temperature;
-    document.getElementById('rpVal').textContent = r.repeat_penalty;
-    document.getElementById('mtVal').textContent = r.max_tokens;
-
-    // 第三方模式：repeat_penalty 不支持，置灰
-    const api = r.mode === 'third_party';
-    const rp = document.getElementById('rpSlider');
-    rp.disabled = api;
-    rp.style.opacity = api ? 0.35 : 1;
-    const rpNote = document.getElementById('rpVal');
-    rpNote.textContent = api ? 'API 不支持' : r.repeat_penalty;
-
-    // 单条上限：本地 40~600，第三方 40~2000
-    const mt = document.getElementById('mtSlider');
-    mt.min = 40;
-    mt.max = api ? 2000 : 600;
-    mt.step = api ? 20 : 10;
-    if (parseInt(mt.value, 10) > parseInt(mt.max, 10)) mt.value = mt.max;
-    document.getElementById('mtVal').textContent =
-      mt.value + ' tok' + (api ? '' : '（本地）');
-  } catch (e) {}
+  const r = await api('/api/sampling?t=' + Date.now());
+  if (!r.ok) { say('sampMsg', '接口不可用：' + r.error); return; }
+  const s = r.data;
+  document.getElementById('tempSlider').value = s.temperature;
+  document.getElementById('rpSlider').value = s.repeat_penalty;
+  document.getElementById('mtSlider').value = s.max_tokens;
+  say('tempVal', s.temperature);
+  const apiMode = s.mode === 'third_party';
+  const rp = document.getElementById('rpSlider');
+  rp.disabled = apiMode;
+  rp.style.opacity = apiMode ? 0.35 : 1;
+  say('rpVal', apiMode ? 'API 不支持' : s.repeat_penalty);
+  const mt = document.getElementById('mtSlider');
+  mt.min = 40; mt.max = apiMode ? 2000 : 600; mt.step = apiMode ? 20 : 10;
+  if (parseInt(mt.value, 10) > parseInt(mt.max, 10)) mt.value = mt.max;
+  say('mtVal', mt.value + ' tok' + (apiMode ? '' : '（本地）'));
 }
-
 async function applySampling() {
-  const body = {
+  say('sampMsg', '保存中…');
+  const r = await post('/api/sampling', {
     temperature: parseFloat(document.getElementById('tempSlider').value),
     repeat_penalty: parseFloat(document.getElementById('rpSlider').value),
-    max_tokens: parseInt(document.getElementById('mtSlider').value, 10),
-  };
-  document.getElementById('sampMsg').textContent = '保存中…';
-  const r = await (await fetch('/api/sampling', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(body)
-  })).json();
-  document.getElementById('sampMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
+    max_tokens: parseInt(document.getElementById('mtSlider').value, 10)
+  });
+  say('sampMsg', r.ok ? (r.data.msg || '已保存') : r.error);
 }
 
+/* ============ contexts / auto reply ============ */
 async function loadContexts() {
-  const r = await (await fetch('/api/contexts?t=' + Date.now())).json();
-  document.getElementById('ctxList').innerHTML = r.items.length
-    ? r.items.map(c => `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)">
+  const r = await api('/api/contexts?t=' + Date.now());
+  if (!r.ok) { fail(r, 'ctxList', null); return; }
+  document.getElementById('ctxList').innerHTML = r.data.items.length
+    ? r.data.items.map(c => `<div style="display:flex;gap:10px;align-items:center;padding:6px 0;border-bottom:1px solid var(--line)">
         <span style="flex:1">${esc(c.umo)}<span class="meta"> · ${c.messages} 条 · ${c.kb} KB · ${esc(c.updated)}</span></span>
         <button style="padding:3px 10px;font-size:11.5px" onclick="clearContext('${esc(c.umo)}')">清空</button>
       </div>`).join('')
     : '<span class="hint">没有存下来的对话</span>';
 }
-
 async function clearContext(umo) {
   if (!confirm('清空这个会话的上下文？')) return;
-  const r = await (await fetch('/api/contexts/clear', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({umo})
-  })).json();
-  if (!r.ok) { alert(r.msg); return; }
+  const r = await post('/api/contexts/clear', {umo});
+  if (!r.ok) { alert(r.error); return; }
+  if (!r.data.ok) { alert(r.data.msg); return; }
   loadContexts();
 }
-
 async function clearAllContexts() {
   if (!confirm('清空全部会话上下文？')) return;
-  const r = await (await fetch('/api/contexts/clear', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({all: true})
-  })).json();
-  if (!r.ok) { alert(r.msg); return; }
+  const r = await post('/api/contexts/clear', {all:true});
+  if (!r.ok) { alert(r.error); return; }
+  if (!r.data.ok) { alert(r.data.msg); return; }
   loadContexts();
 }
-
 async function loadAutoReply() {
-  const r = await (await fetch('/api/autoreply?t=' + Date.now())).json();
-  document.getElementById('autoList').innerHTML = r.items.map(w => `
+  const r = await api('/api/autoreply?t=' + Date.now());
+  if (!r.ok) { fail(r, 'autoList', 'autoMsg'); return; }
+  document.getElementById('autoList').innerHTML = r.data.items.map(w => `
     <div class="pitem" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
       <label style="margin:0;display:flex;align-items:center;gap:8px;color:var(--text)">
         <input type="checkbox" data-agid="${w.id}" ${w.enabled ? 'checked' : ''}>
@@ -1058,57 +1107,48 @@ async function loadAutoReply() {
       <span class="meta">${w.count} 条 · ${esc(w.last || '—')}</span>
     </div>`).join('') || '<span class="hint">还没有可用群</span>';
 }
-
 async function saveAutoReply() {
   const items = [...document.querySelectorAll('#autoList input[type=checkbox]')].map(cb => ({
     id: cb.dataset.agid, enabled: cb.checked
   }));
-  document.getElementById('autoMsg').textContent = '保存中…';
-  const r = await (await fetch('/api/autoreply', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({items})
-  })).json();
-  document.getElementById('autoMsg').textContent = r.msg || '已保存';
+  say('autoMsg', '保存中…');
+  const r = await post('/api/autoreply', {items});
+  say('autoMsg', r.ok ? (r.data.msg || '已保存') : r.error);
 }
 
+/* ============ models / vision stats / plugins ============ */
 async function loadModels() {
-  try {
-    const m = await (await fetch('/api/models?t=' + Date.now())).json();
-    const sel = document.getElementById('modelSel');
-    sel.innerHTML = m.items.map(n =>
-      `<option value="${esc(n)}" ${n === m.current ? 'selected' : ''}>${esc(n)}${n === m.current ? ' ← 当前' : ''}</option>`
-    ).join('');
-    document.getElementById('modelMsg').textContent = '当前：' + (m.current || '未知');
-  } catch (e) {}
-}
-
-async function applyModel() {
+  const r = await api('/api/models?t=' + Date.now());
+  if (!r.ok) { fail(r, 'modelSel', 'modelMsg'); return; }
+  const m = r.data;
   const sel = document.getElementById('modelSel');
-  const name = sel.value;
-  document.getElementById('modelMsg').textContent = '切换中…';
-  const r = await (await fetch('/api/models', {
-    method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({model: name})
-  })).json();
-  document.getElementById('modelMsg').textContent = r.msg || (r.ok ? '已切换' : '失败');
+  sel.innerHTML = m.items.map(n =>
+    `<option value="${esc(n)}" ${n === m.current ? 'selected' : ''}>${esc(n)}${n === m.current ? ' ← 当前' : ''}</option>`
+  ).join('');
+  say('modelMsg', '当前：' + (m.current || '未知'));
+}
+async function applyModel() {
+  const name = document.getElementById('modelSel').value;
+  say('modelMsg', '切换中…');
+  const r = await post('/api/models', {model:name});
+  say('modelMsg', r.ok ? (r.data.msg || '已切换') : r.error);
   setTimeout(loadModels, 8000);
 }
-
 async function loadVision() {
-  try {
-    const v = await (await fetch('/api/vision')).json();
-    document.getElementById('capEntries').textContent = v.cache_entries;
-    document.getElementById('capHits').textContent = v.cache_hits;
-    document.getElementById('memeImages').textContent = v.meme_images + ' / ' + v.meme_packs + ' 包';
-    document.getElementById('capList').innerHTML = v.recent.length
-      ? v.recent.map(r => `<li><span class="meta">${esc(r.at)} · ${esc(r.hash)}</span>${esc(r.text)}</li>`).join('')
-      : '<li class="empty">还没识别过图片</li>';
-  } catch (e) {}
+  const r = await api('/api/vision');
+  if (!r.ok) { fail(r, 'capList', null); return; }
+  const v = r.data;
+  document.getElementById('capEntries').textContent = v.cache_entries;
+  document.getElementById('capHits').textContent = v.cache_hits;
+  document.getElementById('memeImages').textContent = v.meme_images + ' / ' + v.meme_packs + ' 包';
+  document.getElementById('capList').innerHTML = v.recent.length
+    ? v.recent.map(x => `<li><span class="meta">${esc(x.at)} · ${esc(x.hash)}</span>${esc(x.text)}</li>`).join('')
+    : '<li class="empty">还没识别过图片</li>';
 }
-
 async function loadPlugins() {
-  const r = await (await fetch('/api/plugins')).json();
-  document.getElementById('plist').innerHTML = r.items.map(p =>
+  const r = await api('/api/plugins');
+  if (!r.ok) { fail(r, 'plist', null); return; }
+  document.getElementById('plist').innerHTML = r.data.items.map(p =>
     `<div class="pitem"><b>${esc(p.name)}</b>
       <span class="meta">${esc(p.slug)} · v${esc(p.version)} · ${p.files} 个 py 文件</span>
       <div class="hint" style="margin-top:4px">${esc(p.desc)}</div>
@@ -1116,31 +1156,27 @@ async function loadPlugins() {
   ).join('') || '<span class="hint">没有插件</span>';
 }
 
+/* ============ start / stop ============ */
 async function act(kind) {
-  document.getElementById('msg').textContent = '执行中…';
-  const r = await (await fetch('/api/' + kind, {method:'POST'})).json();
-  document.getElementById('msg').textContent = r.msg;
-  setTimeout(() => document.getElementById('msg').textContent = '', 8000);
+  if (!capOk('scripts')) { say('msg', '缺少启停脚本，无法执行'); return; }
+  say('msg', '执行中…');
+  const r = await api('/api/' + kind, {method:'POST'});
+  say('msg', r.ok ? (r.data.msg || '完成') : r.error);
+  setTimeout(() => say('msg', ''), 8000);
   setTimeout(refresh, 4000);
 }
 
-refresh();
-loadAccess();
-loadWater();
-loadContexts();
-loadAutoReply();
-loadLtmRecent();
-loadReply();
-loadThinking();
-loadGuard();
-loadVisionMode();
-loadSampling();
-loadPersona();
-loadJudge();
-loadModels();
-loadVision();
-loadPlugins();
-setInterval(refresh, 5000);
+/* ============ boot ============ */
+(async function boot() {
+  await loadCapabilities();   // apply grey-out before firing every panel's API
+  refresh();
+  refreshLog();
+  loadAccess(); loadWater(); loadContexts(); loadAutoReply(); loadLtmRecent();
+  loadReply(); loadThinking(); loadGuard(); loadVisionMode(); loadSampling();
+  loadPersona(); loadJudge(); loadModels(); loadVision(); loadPlugins();
+  loadProfile(); loadLtmPrompt();
+  setInterval(refresh, 5000);
+})();
 </script>
 </body>
 </html>
