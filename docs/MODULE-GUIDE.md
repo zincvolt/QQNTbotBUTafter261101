@@ -61,7 +61,7 @@ D:\QQNTBOT\scripts\restart-astrbot.ps1
 | `@filter.command("名字")` | 收到 `/名字` | 用户指令 |
 | `@filter.llm_tool(name="xxx")` | 模型主动调用 | 给模型加工具 |
 | `@filter.event_message_type(...)` | 每条消息 | 记录、过滤 |
-| `@filter.after_message_sent()` | 发送后 | 回执、日志 |
+| `@filter.after_message_sent()` | 发送后（**所有分段发完之后**） | 回执、日志；判官的「在途锁」靠它收敛成真实发完时刻 |
 
 ### 各钩子的签名
 
@@ -113,13 +113,26 @@ async def cmd(self, event: AstrMessageEvent):
 
 ## 4. 改"要不要接话"的三种姿势
 
-群聊决策链：
+群聊决策链**按模式分两套**，改之前先确认当前是哪一套（`is_third_party_mode()` 读的就是 AstrBot 的 `provider_id`）：
 
 ```
-群消息 → 白名单 → 唤醒检查 → need_active_reply()
-                                    ├─ 关键词规则（judge.json）
-                                    └─ 判官模型（1.5B）
+群消息 → 白名单 → @ / 唤醒前缀？
+                    ├─ 是 → AstrBot 内置回复通道（不经过判官！）
+                    │         └─ 第三方模式：on_req_llm 里还挡一道「在途硬锁」
+                    └─ 否 → need_active_reply()
+                              ├─ 本地模式（local-llama）：
+                              │    judge.json 规则 → 8082 小模型 → 概率闸
+                              └─ 第三方模式（deepseek 等）：
+                                   话段聚合 → 规则层 → 省 token 复用
+                                   → 第三方判官 API → 可选概率闸
 ```
+
+两个容易踩的点：
+
+- **@ 它和唤醒前缀不走判官**（`need_active_reply` 第一句就 `return False`）。想约束这条路径，只能加在 `on_llm_request`。
+- **本地模式不读 `judge_api.json`**，第三方模式才启用话段聚合和在途硬锁；改判官逻辑时不要把两套混在一起。
+
+第三方判官的完整行为规格（判定顺序、话段聚合、在途硬锁三层、强触发分工、日志与调参）见 `docs\THIRD-PARTY-API.md` §14，或插件仓 `astrbot-plugin-apimode` 的 README「判官模块（描述文档）」。
 
 ### 姿势一：加关键词（不改代码，最快）
 
@@ -156,7 +169,14 @@ async def gate(self, event, req):
 
 ---
 
-## 5. 判官配置格式 `data\judge.json`
+## 5. 判官配置：两份文件，别搞混
+
+| 文件 | 谁读 | 用在 | 管什么 |
+|---|---|---|---|
+| `data\judge.json` | `load_judge_config()` | 本地模式 | 提示词 + 必答/免打扰/召唤词，交给 8082 小模型 |
+| `data\judge_api.json` | `load_judge_api_config()` | **仅第三方模式** | 独立密钥/模型、短提示词、日限额、话段聚合、在途硬锁 |
+
+`judge.json`：
 
 ```json
 {
@@ -170,6 +190,8 @@ async def gate(self, event, req):
 - 缺文件 / 格式错 → 回退到代码里的默认提示词
 - 提示词里没有 `{message}` → 也回退，避免写出无效配置
 
+`judge_api.json`：字段较多（`burst_*` / `inflight_lock` / `bot_names` / `break_words` 等），完整清单见插件仓的 `judge_api.example.json` 与 README。改完即生效，不需要重启；控制台「判官」页写的就是这份文件（合并写入，只覆盖请求里真带了的字段）。
+
 ---
 
 ## 6. 本项目对 AstrBot 源码的补丁（升级会覆盖）
@@ -178,9 +200,9 @@ async def gate(self, event, req):
 |---|---|
 | `core\pipeline\whitelist_check\stage.py` | 未授权私聊自动回一句"未授权…" |
 | `core\pipeline\respond\stage.py` | 新增 `human` 分段间隔算法（按字数模拟打字） |
-| `builtin_stars\astrbot\group_chat_context.py` | 新增 `judge` 判定方式 + `judge.json` 读取 |
+| `builtin_stars\astrbot\group_chat_context.py` | 群上下文注入 + 判官两套判定（`judge.json` 本地 / `judge_api.json` 第三方）、话段聚合、在途硬锁 |
 
-重装 AstrBot 后要重新打这三处。每处的改动在 README 第 11 节有说明。
+完整清单（含 `core\updater.py` 禁自动升级）见 `docs\PROJECT.md` §14，那是唯一的补丁真相。重装 AstrBot 后要按它逐处重打；升级后如果 `git diff` 里看不到这些改动，说明补丁已经被冲掉了。
 
 ---
 
