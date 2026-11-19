@@ -341,6 +341,17 @@
         </div>
       </div>
 
+      <div class="two" style="margin-top:12px">
+        <div>
+          <label>判定结果缓存秒数（0=不缓存，同群同句直接复用）</label>
+          <input id="jaCache" type="number" min="0" max="3600" step="10">
+        </div>
+        <div>
+          <label>每条上下文截断字数</label>
+          <input id="jaChars" type="number" min="20" max="200" step="10">
+        </div>
+      </div>
+
       <div style="margin-top:12px">
         <label>兜底概率（判官关闭/失败/超限时按这个概率回）</label>
         <input id="jaFallback" type="number" min="0" max="1" step="0.05" placeholder="0.3">
@@ -360,6 +371,16 @@
           保留概率闸（默认关：判官说接就接）
         </label>
       </div>
+
+      <label style="margin-top:12px">必答关键词 / 免打扰关键词（每行一个，命中直接判定，0 token）</label>
+      <div class="two">
+        <div><textarea id="jaForce" rows="3" placeholder="阿灰在吗"></textarea></div>
+        <div><textarea id="jaIgnore" rows="3" placeholder="刷屏"></textarea></div>
+      </div>
+
+      <label style="margin-top:12px">追问直通正则（每行一个，命中就当它在叫它，0 token）</label>
+      <textarea id="jaFollowup" rows="3" placeholder="你不是.{0,6}吗"></textarea>
+      <div class="hint">默认已经内置"你/阿灰/灰灰 + 不是|怎么|为什么|刚才|汪|喵"这类追问；正向命中才生效，别写太宽。</div>
 
       <label style="margin-top:12px">判定提示词（必须保留 {message}，可用 {recent} 和 {last_bot}）</label>
       <textarea id="jaPrompt" rows="8" placeholder="加载中…"></textarea>
@@ -844,11 +865,16 @@ async function loadJudgeApi() {
   document.getElementById('jaModel').value = j.model || '';
   document.getElementById('jaRecent').value = j.recent_max ?? 3;
   document.getElementById('jaLimit').value = j.daily_limit ?? 0;
+  document.getElementById('jaCache').value = j.cache_seconds ?? 30;
+  document.getElementById('jaChars').value = j.recent_chars ?? 60;
   document.getElementById('jaFallback').value = j.fallback_chance ?? 0.3;
   document.getElementById('jaEnable').checked = j.enable !== false;
   document.getElementById('jaBudget').checked = j.budget_gate !== false;
   document.getElementById('jaChance').checked = !!j.use_reply_chance;
   document.getElementById('jaPrompt').value = j.prompt || '';
+  document.getElementById('jaIgnore').value = (j.ignore || []).join('\n');
+  document.getElementById('jaForce').value = (j.force_reply || []).join('\n');
+  document.getElementById('jaFollowup').value = (j.followup_patterns || []).join('\n');
   document.getElementById('jaKeyState').textContent = j.api_key_set
     ? '已配置独立密钥（输入新值可替换）'
     : '未配置，当前沿用主模型密钥';
@@ -866,6 +892,11 @@ async function saveJudgeApi() {
     recent_max: Number(document.getElementById('jaRecent').value) || 3,
     daily_limit: Number(document.getElementById('jaLimit').value) || 0,
     fallback_chance: Number(document.getElementById('jaFallback').value) || 0,
+    cache_seconds: Number(document.getElementById('jaCache').value) || 0,
+    recent_chars: Number(document.getElementById('jaChars').value) || 60,
+    ignore: lines('jaIgnore'),
+    force_reply: lines('jaForce'),
+    followup_patterns: lines('jaFollowup'),
     enable: document.getElementById('jaEnable').checked,
     budget_gate: document.getElementById('jaBudget').checked,
     use_reply_chance: document.getElementById('jaChance').checked,
