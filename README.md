@@ -2,7 +2,7 @@
 
 因为养鱼热封杀在大伙都跑路得差不多之后才用剩饭搭出来的一套能用的 QQ 第三方聊天机器人方案。
 
-本地 AI 接入 QQ 群聊/私聊的机器人。人格「阿灰」——一个嘴损、爱聊猎奇和游戏的狼人兽人，像群友一样聊天，而不是像客服。
+本地 AI 接入 QQ 群聊/私聊的机器人。人格「阿灰」——一个嘴损、爱聊猎奇和游戏的奶牛猫兽人，尝试混入群友
 
 ## 这是什么
 
@@ -41,10 +41,8 @@ stop-all.ps1           一键停止
 | 改造版 QQ.exe、dbghelp.dll | `_backup/`、`apps/` | 修改版腾讯客户端，侵权 + 违反用户协议，**公开分发有下架/法律风险** | 自行准备 QQNT 9.9.25 客户端；注入与绕过校验的做法见 `docs/PROJECT.md`，本仓库不提供二进制 |
 | NapCat 二进制与配置 | `apps/NapCat/` | 上游已删库的 fork，授权灰色 | 自行获取 NapCat；WebUI token 等凭证需重新生成 |
 | LiteLoader | `apps/LiteLoader/` | QQNT 加载器，第三方二进制 | 随 QQNT 环境自行安装 |
-| Furry 表情包图片 | `apps/AstrBot/data/plugin_data/meme_manager/packs/furry/memes/` | 二进制素材（约 18MB），非自研 | 自备图片，按 `docs/COMMANDS.md` 的分类名（惊讶/困惑/…）放入对应目录 |
 | 记忆 / 缓存数据库 | `data/memory.db`、`data/caption_cache.db`、AstrBot `data_v4.db` | 含真实聊天记忆与会话历史，**隐私数据** | 首次运行会自动新建空库 |
 | 真实凭证 | `apps/NapCat/config/webui.json`（token/totp）、`data/cmd_config.json` 的 api_key 与面板密码哈希 | 泄露风险 | 配置文件中已脱敏为 `CHANGE_ME`，填入你自己的值；`webui.json` 需重新生成 |
-| 登录二维码 / 凭证临时文件 | `登录二维码.html`、`login-qr*.png`、`_tmp_*` | 时效性登录凭证 | 启动时扫码重新生成 |
 
 ### B. 刻意不上传：可重建的体积项（有替代方案）
 
@@ -52,12 +50,10 @@ stop-all.ps1           一键停止
 |---|---|---|---|
 | Python 虚拟环境 | `apps/AstrBot/.venv/` | ~419MB | 用 `requirements.txt` / `pyproject.toml` 重新 `pip install` |
 | Node 依赖 | `apps/NapCat/node_modules/` | ~113MB | `pnpm install` |
-| 运行时缓存 | `runtime/` | ~603MB | 首次启动自动生成 |
 | 前端构建产物 | `apps/AstrBot/data/dist/` | — | 从 AstrBot 发行版获取或重新构建 |
-| 备份归档 | `_backup/` | ~4MB | 历史备份，与运行无关 |
 | 模型服务 | 独立目录 `D:\LLM`（不在本项目内） | — | 本项目只**调用**不修改它；模型服务（9B / 判官 1.7B / OCR / 本地VL / 向量）需单独部署，端口见 `docs/PROJECT.md` |
 
-**完整可运行的快照**仅保存在原作者的本机 `D:\QQNTBOT`（含全部依赖与二进制），不在 GitHub。本仓库的目标是"能读懂、能重建逻辑"，不是开箱即用。
+**完整可运行的快照**仅保存在原作者的本机，本仓库的目标是"能读懂、能重建逻辑"，不是开箱即用。
 
 ### C. 版本对应关系（避免版本错配）
 
@@ -74,7 +70,7 @@ stop-all.ps1           一键停止
 
 - 主模型、判官、向量、OCR/VL 等模型服务在另一目录 `D:\LLM`，本仓库只调用不改它
 - `data/cmd_config.json` 里的 `CHANGE_ME` 需替换为真实值
-- AstrBot 升级会覆盖本项目的 6 处源码补丁，升级后务必跑 `verify.ps1`
+- AstrBot 升级会覆盖本项目的 6 处源码补丁，升级后务必跑 `verify.ps1`恢复，不建议更新
 
 ## 许可证
 
