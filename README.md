@@ -26,15 +26,15 @@
 | [astrbot-plugin-furcon](https://github.com/zincvolt/astrbot-plugin-furcon) | 兽聚倒计时、每日运势、群统计，图片卡片输出 |
 
 > 这些插件在本主仓库的 `apps/AstrBot/data/plugins/` 下也各留了一份，方便整体部署；独立仓库便于单独阅读和复用。
-> 表情包管理用的是第三方插件 [anka-afk/astrbot_plugin_meme_manager](https://github.com/anka-afk/astrbot_plugin_meme_manager)，不是自研，故未建独立仓库。
+> 表情包管理用的是第三方插件 [anka-afk/astrbot_plugin_meme_manager](https://github.com/anka-afk/astrbot_plugin_meme_manager)
 
 ## 依赖的上游项目
 
-这套方案站在以下开源项目的肩膀上（链接为官方仓库）：
+这套方案依赖以下开源项目（链接为官方仓库）：
 
 | 项目 | 仓库 | 在本项目中的角色 |
 |---|---|---|
-| AstrBot | [AstrBotDevs/AstrBot](https://github.com/AstrBotDevs/AstrBot) | 机器人框架本体（AGPL-3.0，含本项目 6 处补丁） |
+| AstrBot | [AstrBotDevs/AstrBot](https://github.com/AstrBotDevs/AstrBot) | 机器人框架本体（本项目 6 处补丁） |
 | NapCatQQ | [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ) | QQ 协议端，跑在 QQ 进程内（⚠️ 上游已停更 / ending） |
 | LiteLoaderQQNT | [LiteLoaderQQNT/LiteLoaderQQNT](https://github.com/LiteLoaderQQNT/LiteLoaderQQNT) | QQNT 插件加载器，用于注入 NapCat |
 | OneBot v11 | [botuniverse/onebot-11](https://github.com/botuniverse/onebot-11) | NapCat 与 AstrBot 之间的通信协议规范 |
@@ -59,7 +59,7 @@ start-all.ps1          一键启动（完整环境，需配合本地依赖）
 stop-all.ps1           一键停止
 ```
 
-## 重要：这个仓库不是完整运行环境（缺什么一目了然）
+## 重要：这个仓库不是完整运行环境
 
 本仓库只含**代码与配置模板**。下面逐项列出**没有上传的内容、原因、以及如何补齐**——不需要猜。
 
@@ -67,7 +67,7 @@ stop-all.ps1           一键停止
 
 | 缺失项 | 原始位置 | 为什么没传 | 如何补齐 |
 |---|---|---|---|
-| NapCat 二进制与配置 | `apps/NapCat/` | 已删库跑路的 fork | 自行获取 NapCat；WebUI token 等凭证需重新生成 |
+| NapCat 二进制与配置 | `apps/NapCat/` | 已删库跑路，自建fork | 自行获取 NapCat；WebUI token 等凭证需重新生成 |
 | QQNT、改 | `_backup/`、`apps/` | 修改并注入LiteLoader，我不想吃律师函 | 自行准备 QQNT 9.9.25 客户端；注入与绕过校验的做法见 `docs/PROJECT.md` |
 | LiteLoader（改QQNT） | `apps/LiteLoader/` | QQNT反代 | 自行安装 |
 | 记忆 / 缓存数据库 | `data/memory.db`、`data/caption_cache.db`、AstrBot `data_v4.db` | 含真实聊天记忆与会话历史，**隐私数据** | 首次运行会自动新建空库 |
@@ -106,4 +106,4 @@ stop-all.ps1           一键停止
 
 ## 许可证
 
-本仓库采用 **AGPL-3.0-or-later**（见 [LICENSE](LICENSE)），与所依赖的 AstrBot 上游一致。
+本仓库采用 **AGPL-3.0-or-later**（见 [LICENSE](LICENSE)）
