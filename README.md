@@ -38,11 +38,11 @@ stop-all.ps1           一键停止
 
 | 缺失项 | 原始位置 | 为什么没传 | 如何补齐 |
 |---|---|---|---|
-| 改造版 QQ.exe、dbghelp.dll | `_backup/`、`apps/` | 修改版腾讯客户端，侵权 + 违反用户协议，**公开分发有下架/法律风险** | 自行准备 QQNT 9.9.25 客户端；注入与绕过校验的做法见 `docs/PROJECT.md`，本仓库不提供二进制 |
-| NapCat 二进制与配置 | `apps/NapCat/` | 上游已删库的 fork，授权灰色 | 自行获取 NapCat；WebUI token 等凭证需重新生成 |
-| LiteLoader | `apps/LiteLoader/` | QQNT 加载器，第三方二进制 | 随 QQNT 环境自行安装 |
+| NapCat 二进制与配置 | `apps/NapCat/` | 已删库跑路的 fork | 自行获取 NapCat；WebUI token 等凭证需重新生成 |
+| QQNT、改 | `_backup/`、`apps/` | 修改并注入LiteLoader，我不想吃律师函 | 自行准备 QQNT 9.9.25 客户端；注入与绕过校验的做法见 `docs/PROJECT.md` |
+| LiteLoader（改QQNT） | `apps/LiteLoader/` | QQNT反代 | 自行安装 |
 | 记忆 / 缓存数据库 | `data/memory.db`、`data/caption_cache.db`、AstrBot `data_v4.db` | 含真实聊天记忆与会话历史，**隐私数据** | 首次运行会自动新建空库 |
-| 真实凭证 | `apps/NapCat/config/webui.json`（token/totp）、`data/cmd_config.json` 的 api_key 与面板密码哈希 | 泄露风险 | 配置文件中已脱敏为 `CHANGE_ME`，填入你自己的值；`webui.json` 需重新生成 |
+| 真实凭证 | `apps/NapCat/config/webui.json`（token/totp）、`data/cmd_config.json` 的 api_key 与面板密码哈希 | 不想给别人用自己的token | 配置文件中已脱敏为 `CHANGE_ME`，填入你自己的值；`webui.json` 需重新生成 |
 
 ### B. 刻意不上传：可重建的体积项（有替代方案）
 
@@ -53,12 +53,12 @@ stop-all.ps1           一键停止
 | 前端构建产物 | `apps/AstrBot/data/dist/` | — | 从 AstrBot 发行版获取或重新构建 |
 | 模型服务 | 独立目录 `D:\LLM`（不在本项目内） | — | 本项目只**调用**不修改它；模型服务（9B / 判官 1.7B / OCR / 本地VL / 向量）需单独部署，端口见 `docs/PROJECT.md` |
 
-**完整可运行的快照**仅保存在原作者的本机，本仓库的目标是"能读懂、能重建逻辑"，不是开箱即用。
+**完整可运行的快照**仅保存在原作者的本机，本仓库只提供思路喵，不是开箱即用。
 
 ### C. 版本对应关系（避免版本错配）
 
-- QQNT 客户端：**9.9.25**（版本锁死，升级会导致注入失效；hosts 已屏蔽更新域名）
-- AstrBot：**4.29.4**，基于上游 AGPL-3.0，含本项目 6 处源码补丁（见 `docs/PROJECT.md` §14，`scripts/verify.ps1` 可核对补丁是否存活）
+- QQNT 客户端：**9.9.25**（升级会导致注入失效；建议hosts屏蔽更新域名）
+- AstrBot（建议版本）：**4.29.4**，基于上游 AGPL-3.0，含本项目 6 处源码补丁（见 `docs/PROJECT.md` §14，`scripts/verify.ps1` 可核对补丁是否存活）
 
 ## 接手指引
 
@@ -68,7 +68,7 @@ stop-all.ps1           一键停止
 
 ## 部署提示
 
-- 主模型、判官、向量、OCR/VL 等模型服务在另一目录 `D:\LLM`，本仓库只调用不改它
+- （本地9B）主模型、判官、向量、OCR/VL 等模型服务在另一目录 `D:\LLM`，本仓库只调用不改它
 - `data/cmd_config.json` 里的 `CHANGE_ME` 需替换为真实值
 - AstrBot 升级会覆盖本项目的 6 处源码补丁，升级后务必跑 `verify.ps1`恢复，不建议更新
 
