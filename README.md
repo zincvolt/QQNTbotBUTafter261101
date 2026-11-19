@@ -24,6 +24,7 @@
 | [astrbot-plugin-vision-context](https://github.com/zincvolt/astrbot-plugin-vision-context) | 群图上下文：后台给图片生成释义并缓存，回复时按需注入 |
 | [astrbot-plugin-websearch](https://github.com/zincvolt/astrbot-plugin-websearch) | 联网搜索：接本地 SearXNG，自动 + 工具两种入口 |
 | [astrbot-plugin-furcon](https://github.com/zincvolt/astrbot-plugin-furcon) | 兽聚倒计时、每日运势、群统计，图片卡片输出 |
+| [astrbot-plugin-repeat](https://github.com/zincvolt/astrbot-plugin-repeat) | 群聊复读机：三条以上相同消息自动复读一次，带冷却与去重 |
 
 > 这些插件在本主仓库的 `apps/AstrBot/data/plugins/` 下也各留了一份，方便整体部署；独立仓库便于单独阅读和复用。
 > 表情包管理用的是第三方插件 [anka-afk/astrbot_plugin_meme_manager](https://github.com/anka-afk/astrbot_plugin_meme_manager)
