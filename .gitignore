@@ -58,3 +58,6 @@ data/furcons_cache.json
 Thumbs.db
 Desktop.ini
 .DS_Store
+
+# t2i 运行时模板（从上游拉取，不入库）
+data/t2i_templates/
