@@ -97,6 +97,7 @@ stop-all.ps1           一键停止
 3. 按主题查 [docs/](docs/) 下其他文档
 4. 改完代码跑 `scripts/verify.ps1` 验证（尤其 AstrBot 升级后查补丁是否还在）
 5. **判官有两套互不干扰的配置**：本地模式用 `data/judge.json` + 8082；第三方模式用 `data/judge_api.json` + API，按主模型 provider 自动切换，细节见 [docs/THIRD-PARTY-API.md](docs/THIRD-PARTY-API.md) §14
+6. **连发抑制**（一句话别回四遍）：`judge_delay` / `reply_gap` / `dup_window` / `dup_ratio` 都在 `data/judge_api.json`，控制台「判官 → 连发抑制」可调，机制见 [docs/THIRD-PARTY-API.md](docs/THIRD-PARTY-API.md) §14.6
 
 ## 部署提示
 

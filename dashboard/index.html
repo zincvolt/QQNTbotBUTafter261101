@@ -357,6 +357,31 @@
         <input id="jaFallback" type="number" min="0" max="1" step="0.05" placeholder="0.3">
       </div>
 
+      <label style="margin-top:16px;color:var(--text)">连发抑制（一条话还在生成/刚发完时，同一口气的后一句不再单独回一遍）</label>
+      <div class="two" style="margin-top:6px">
+        <div>
+          <label>判定前等待秒数（期间来了新消息就交给最新那条）</label>
+          <input id="jaDelay" type="number" min="0" max="10" step="0.5">
+        </div>
+        <div>
+          <label>回复后静默秒数（0=不留间隔）</label>
+          <input id="jaGap" type="number" min="0" max="600" step="1">
+        </div>
+      </div>
+      <div class="two" style="margin-top:12px">
+        <div>
+          <label>相似去重窗口秒数（0=关闭）</label>
+          <input id="jaDupWindow" type="number" min="0" max="600" step="5">
+        </div>
+        <div>
+          <label>相似阈值（0.5~1，越大越严格）</label>
+          <input id="jaDupRatio" type="number" min="0" max="1" step="0.05">
+        </div>
+      </div>
+      <div class="hint" style="margin-top:6px">
+        回复在途最长按 90 秒认领；唤醒词不延迟，但同样受「静默」和「相似去重」约束。
+      </div>
+
       <div style="display:grid;gap:10px;margin-top:12px">
         <label style="display:flex;align-items:center;gap:10px;color:var(--text)">
           <input type="checkbox" id="jaEnable">
@@ -847,6 +872,14 @@ async function loadJudge() {
 function lines(id) {
   return document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
 }
+
+// 0 是有效值（比如“判定前等待 0 秒”），不能用 || 兜默认
+function numOr(id, fallback) {
+  const raw = document.getElementById(id).value.trim();
+  if (raw === '') return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) ? n : fallback;
+}
 async function saveJudge() {
   say('judgeMsg', '保存中…');
   const r = await post('/api/judge', {
@@ -868,6 +901,10 @@ async function loadJudgeApi() {
   document.getElementById('jaCache').value = j.cache_seconds ?? 30;
   document.getElementById('jaChars').value = j.recent_chars ?? 60;
   document.getElementById('jaFallback').value = j.fallback_chance ?? 0.3;
+  document.getElementById('jaDelay').value = j.judge_delay ?? 2;
+  document.getElementById('jaGap').value = j.reply_gap ?? 12;
+  document.getElementById('jaDupWindow').value = j.dup_window ?? 45;
+  document.getElementById('jaDupRatio').value = j.dup_ratio ?? 0.75;
   document.getElementById('jaEnable').checked = j.enable !== false;
   document.getElementById('jaBudget').checked = j.budget_gate !== false;
   document.getElementById('jaChance').checked = !!j.use_reply_chance;
@@ -894,6 +931,10 @@ async function saveJudgeApi() {
     fallback_chance: Number(document.getElementById('jaFallback').value) || 0,
     cache_seconds: Number(document.getElementById('jaCache').value) || 0,
     recent_chars: Number(document.getElementById('jaChars').value) || 60,
+    judge_delay: numOr('jaDelay', 2),
+    reply_gap: numOr('jaGap', 12),
+    dup_window: numOr('jaDupWindow', 45),
+    dup_ratio: numOr('jaDupRatio', 0.75),
     ignore: lines('jaIgnore'),
     force_reply: lines('jaForce'),
     followup_patterns: lines('jaFollowup'),

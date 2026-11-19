@@ -1,5 +1,6 @@
 import asyncio
 import datetime
+import difflib
 import json
 import random
 import re
@@ -284,6 +285,12 @@ def load_judge_api_config() -> dict:
         "reply_chance": 1.0,
         "fallback_chance": 0.3,
         "cache_seconds": 30,
+        # 连发抑制：一条在生成/刚发完时，别把后一句也当成新话题再回一遍
+        "judge_delay": 2.0,
+        "reply_gap": 12,
+        "inflight_ttl": 90,
+        "dup_window": 45,
+        "dup_ratio": 0.75,
         "daily_limit": 50000,
         "used": {"date": "", "tokens": 0},
         "ignore": [],
@@ -329,6 +336,11 @@ def load_judge_api_config() -> dict:
         "reply_chance": _as_float(raw.get("reply_chance"), 1.0, 0.0, 1.0),
         "fallback_chance": _as_float(raw.get("fallback_chance"), 0.3, 0.0, 1.0),
         "cache_seconds": _as_int(raw.get("cache_seconds"), 30, 0, 3600),
+        "judge_delay": _as_float(raw.get("judge_delay"), 2.0, 0.0, 10.0),
+        "reply_gap": _as_int(raw.get("reply_gap"), 12, 0, 600),
+        "inflight_ttl": _as_int(raw.get("inflight_ttl"), 90, 10, 600),
+        "dup_window": _as_int(raw.get("dup_window"), 45, 0, 600),
+        "dup_ratio": _as_float(raw.get("dup_ratio"), 0.75, 0.0, 1.0),
         "daily_limit": _as_int(raw.get("daily_limit"), 50000, 0, 10_000_000),
         "used": {
             "date": str(used.get("date") or ""),
@@ -381,6 +393,23 @@ def _record_text(record) -> str:
     return re.sub(r"^\[[^\]]*\]:\s*", "", str(record)).strip()
 
 
+def _similarity(left: str, right: str) -> float:
+    """Character-level similarity of two short messages (0.0 - 1.0).
+
+    Used only to decide whether two consecutive messages are the same thing
+    said twice, so punctuation, spaces and emoji are dropped first.
+    """
+    def _norm(text: str) -> str:
+        return re.sub(r"[\s\W_]+", "", str(text or "")).lower()
+
+    a, b = _norm(left), _norm(right)
+    if not a or not b:
+        return 0.0
+    if a == b:
+        return 1.0
+    return difflib.SequenceMatcher(None, a, b).ratio()
+
+
 class GroupChatContext:
     def __init__(self, acm: AstrBotConfigManager, context: star.Context) -> None:
         self.acm = acm
@@ -392,6 +421,9 @@ class GroupChatContext:
         self._reply_times: dict[str, deque[float]] = defaultdict(deque)
         # 第三方判官运行时状态
         self._last_bot: dict[str, str] = {}
+        # 连发抑制：待回/刚回的截止时间，以及上次触发回复的消息
+        self._pending_until: dict[str, float] = {}
+        self._last_trigger: dict[str, tuple[float, str]] = {}
         self._judge_cache_map: dict[tuple[str, str], tuple[float, bool]] = {}
         self._judge_fail = 0
         self._judge_cooldown_until = 0.0
@@ -487,15 +519,21 @@ class GroupChatContext:
         for word in api_cfg.get("summon", []):
             if word not in summon_words:
                 summon_words.append(word)
+        summon_hit = ""
         for word in summon_words:
             if word and word in text:
-                self._note_reply(event.unified_msg_origin)
-                logger.info(f"group judge | 召唤词({word})直通 | {text[:30]}")
-                return True
+                summon_hit = word
+                break
 
         # 第三方模式走独立的一套：规则前置 + 短提示词 + 独立密钥/额度
+        # 召唤词也交给它处理：要过快慢判定，但不能绕过「刚回过话就别再回」的抑制
         if is_third_party_mode():
-            return await self._need_active_reply_api(event, cfg, api_cfg)
+            return await self._need_active_reply_api(event, cfg, api_cfg, summon_hit)
+
+        if summon_hit:
+            self._note_reply(event.unified_msg_origin)
+            logger.info(f"group judge | 召唤词({summon_hit})直通 | {text[:30]}")
+            return True
 
         match cfg["ar_method"]:
             case "possibility_reply":
@@ -517,14 +555,42 @@ class GroupChatContext:
         return False
 
     async def _need_active_reply_api(
-        self, event: AstrMessageEvent, cfg: dict, api_cfg: dict
+        self, event: AstrMessageEvent, cfg: dict, api_cfg: dict, summon_hit: str = ""
     ) -> bool:
-        """第三方模式的接话判定：规则前置，模型只看裁剪后的短上下文。
+        """Decide whether to chime in, one decision at a time per group.
+
+        同一口气发来的几条消息会各自触发一次判定。如果并发执行，它们都会看到
+        「还没有人认领这次回复」而全部放行，最后还是连发。所以整个判定按群串行。
+
+        Args:
+            event: Incoming group message.
+            cfg: Active-reply config.
+            api_cfg: Third-party judge profile.
+            summon_hit: Matched wake-word, empty when the message did not summon.
+
+        Returns:
+            True when the bot should chime in.
+        """
+        async with self._get_lock(event.unified_msg_origin):
+            return await self._need_active_reply_api_inner(
+                event, cfg, api_cfg, summon_hit
+            )
+
+    async def _need_active_reply_api_inner(
+        self, event: AstrMessageEvent, cfg: dict, api_cfg: dict, summon_hit: str = ""
+    ) -> bool:
+        """第三方模式的接话判定：先挡连发，再看规则，最后才花 token。
+
+        一条回复从判定到真正发出去要好几秒，这期间同一口气发来的后续消息
+        如果各自都过一遍判定，就会连着发出几条语义差不多的回复。所以按
+        「回复在途/刚发完 → 条数限制 → 规则层 → 相似去重 → 静默窗口 → 模型」
+        的顺序挡，越靠前越省 token，唤醒词也不越过前两道。
 
         Args:
             event: Incoming group message.
             cfg: Active-reply config (probability fallback only).
             api_cfg: Third-party judge profile from ``judge_api.json``.
+            summon_hit: Matched wake-word, empty when the message did not summon.
 
         Returns:
             True when the bot should chime in.
@@ -534,12 +600,29 @@ class GroupChatContext:
         if not message:
             return False
 
-        # 条数限制前处理：超了就不花 token（开关：budget_gate）
+        # 1) 回复在途，或刚发完仍在间隔里：同一口气只回一次（唤醒词也受这条约束）
+        remain = self._suppressed_for(umo)
+        if remain > 0:
+            logger.info(
+                f"group judge | 连发抑制(剩{remain:.0f}s, summon={summon_hit or '-'}) "
+                f"| {message[:30]}"
+            )
+            return False
+
+        # 2) 条数限制前处理：超了就不花 token（开关：budget_gate）
         if api_cfg.get("budget_gate", True):
             over, used = self._over_budget(umo)
             if over:
                 logger.info(f"group judge | 条数限制({used})前置拦截 | {message[:30]}")
                 return False
+
+        # 3) 唤醒词：不延迟（要快），但仍要过相似去重
+        if summon_hit:
+            if self._too_similar(umo, message, api_cfg):
+                return False
+            logger.info(f"group judge | 召唤词({summon_hit})直通 | {message[:30]}")
+            self._mark_trigger(umo, message, api_cfg)
+            return True
 
         for kw in api_cfg["ignore"]:
             if kw and kw in message:
@@ -548,11 +631,13 @@ class GroupChatContext:
         for kw in api_cfg["force_reply"]:
             if kw and kw in message:
                 logger.info(f"group judge | API 必答({kw}) | {message[:40]}")
+                self._mark_trigger(umo, message, api_cfg)
                 return True
         for pattern in api_cfg["force_patterns"]:
             try:
                 if re.search(pattern, message):
                     logger.info(f"group judge | API 必答正则({pattern}) | {message[:40]}")
+                    self._mark_trigger(umo, message, api_cfg)
                     return True
             except re.error:
                 continue
@@ -561,6 +646,7 @@ class GroupChatContext:
             try:
                 if re.search(pattern, message):
                     logger.info(f"group judge | 追问直通({pattern}) | {message[:40]}")
+                    self._mark_trigger(umo, message, api_cfg)
                     return True
             except re.error:
                 continue
@@ -573,15 +659,40 @@ class GroupChatContext:
             logger.info(f"group judge | 复读不接 | {message[:20]}")
             return False
 
+        # 4) 相似去重：和刚触发过回复的那句几乎一样，就不再判一次
+        if self._too_similar(umo, message, api_cfg):
+            return False
+
+        # 5) 静默窗口：先等一会儿，让同一口气的后半句落地
+        delay = api_cfg["judge_delay"]
+        if delay > 0:
+            marker = self._record_marker(umo)
+            await asyncio.sleep(delay)
+            if self._record_marker(umo) != marker:
+                logger.info(
+                    f"group judge | 等待{delay:g}s内来了新消息，交由最新一条判定 "
+                    f"| {message[:30]}"
+                )
+                return False
+            if self._suppressed_for(umo) > 0:
+                logger.info(f"group judge | 等待期间已回复，本轮放弃 | {message[:30]}")
+                return False
+
         # 关掉第三方判官：不碰 8082，直接规则 + 概率兜底
         if not api_cfg["enable"]:
             logger.info("group judge | 第三方判官已关，走规则+概率")
-            return random.random() < api_cfg["fallback_chance"]
+            if random.random() < api_cfg["fallback_chance"]:
+                self._mark_trigger(umo, message, api_cfg)
+                return True
+            return False
 
         verdict = await self._judge_api(umo, message, records, api_cfg)
         if verdict is None:
             # 失败/超限/熔断：概率兜底，不硬中断
-            return random.random() < api_cfg["fallback_chance"]
+            if random.random() < api_cfg["fallback_chance"]:
+                self._mark_trigger(umo, message, api_cfg)
+                return True
+            return False
         if not verdict:
             return False
         if api_cfg["use_reply_chance"] and random.random() >= api_cfg["reply_chance"]:
@@ -590,6 +701,7 @@ class GroupChatContext:
                 f"(chance={api_cfg['reply_chance']:.2f}) | {message[:30]}"
             )
             return False
+        self._mark_trigger(umo, message, api_cfg)
         return True
 
     async def _judge_api(
@@ -765,6 +877,62 @@ class GroupChatContext:
         text = (text or "").strip()
         if text:
             self._last_bot[umo] = text[:200]
+        # 真正发完了：在途标记收敛成「刚回过话」的间隔，避免下一条消息立刻再接
+        gap = load_judge_api_config()["reply_gap"]
+        self._pending_until[umo] = time.time() + max(0, gap)
+
+    def _suppressed_for(self, umo: str) -> float:
+        """还有多少秒处于「回复在途 / 刚回过话」的抑制期。
+
+        Args:
+            umo: Unified message origin of the group.
+
+        Returns:
+            Remaining seconds; 0 when the bot may reply again.
+        """
+        return max(0.0, self._pending_until.get(umo, 0.0) - time.time())
+
+    def _mark_trigger(self, umo: str, message: str, api_cfg: dict) -> None:
+        """Reserve the slot: one reply per burst, and remember what triggered it."""
+        self._note_reply(umo)
+        self._pending_until[umo] = time.time() + api_cfg["inflight_ttl"]
+        self._last_trigger[umo] = (time.time(), message[:200])
+
+    def _record_marker(self, umo: str) -> tuple[int, str]:
+        """Cheap fingerprint of the group's message stream, used to spot new arrivals."""
+        ids = self._record_ids.get(umo)
+        if ids:
+            return (len(ids), ids[-1])
+        return (len(self.raw_records.get(umo) or ()), "")
+
+    def _too_similar(self, umo: str, message: str, api_cfg: dict) -> bool:
+        """Whether this message is a near-repeat of the one that just got a reply.
+
+        Args:
+            umo: Unified message origin of the group.
+            message: Incoming text.
+            api_cfg: Third-party judge profile.
+
+        Returns:
+            True when it should be skipped instead of answered again.
+        """
+        window = api_cfg["dup_window"]
+        ratio = api_cfg["dup_ratio"]
+        if window <= 0 or ratio <= 0:
+            return False
+        prev = self._last_trigger.get(umo)
+        if not prev:
+            return False
+        when, prev_text = prev
+        if time.time() - when > window:
+            return False
+        score = _similarity(prev_text, message)
+        if score < ratio:
+            return False
+        logger.info(
+            f"group judge | 与上一条触发高度相似({score:.2f})不重复接 | {message[:30]}"
+        )
+        return True
 
     def _note_reply(self, umo: str) -> None:
         """记一次回复（@、召唤词、随机插话都算）。"""

@@ -14,6 +14,11 @@
   "reply_chance": 1.0,
   "fallback_chance": 0.3,
   "cache_seconds": 30,
+  "judge_delay": 2.0,
+  "reply_gap": 12,
+  "inflight_ttl": 90,
+  "dup_window": 45,
+  "dup_ratio": 0.75,
   "daily_limit": 50000,
   "used": {
     "date": "",
