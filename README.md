@@ -8,12 +8,10 @@
 
 - **用真实 QQ 登录**（非官方 bot、非协议库），QQNT + NapCat 跑在本机
 - **本地大模型**（9B）或第三方 DeepSeek 双模式，可热切换
-- 有判官模型决定"该不该接这句话"、长期记忆、读图、发表情包、联网搜索、兽聚倒计时等指令
+- 判官模型决定"该不该接这句话"、长期记忆、读图、发表情包、联网搜索、兽聚倒计时等指令
 - 设计取向：**宁可少说、装死，也不刷屏、不编事实**
 
-## 自研插件
-
-本项目自己写的 AstrBot 插件，每个都拆成了独立仓库（公开），可读源码与用途说明：
+## 写了一些插件
 
 | 插件 | 用途 |
 |---|---|
@@ -35,8 +33,8 @@
 
 | 项目 | 仓库 | 在本项目中的角色 |
 |---|---|---|
-| AstrBot | [AstrBotDevs/AstrBot](https://github.com/AstrBotDevs/AstrBot) | 机器人框架本体（本项目 6 处补丁） |
-| NapCatQQ | [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ) | QQ 协议端，跑在 QQ 进程内（⚠️ 上游已停更 / ending） |
+| AstrBot | [AstrBotDevs/AstrBot](https://github.com/AstrBotDevs/AstrBot) | 机器人框架本体 |
+| NapCatQQ | [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ) | QQ 协议端，跑在 QQNT 进程内（ending） |
 | LiteLoaderQQNT | [LiteLoaderQQNT/LiteLoaderQQNT](https://github.com/LiteLoaderQQNT/LiteLoaderQQNT) | QQNT 插件加载器，用于注入 NapCat |
 | OneBot v11 | [botuniverse/onebot-11](https://github.com/botuniverse/onebot-11) | NapCat 与 AstrBot 之间的通信协议规范 |
 | SearXNG | [searxng/searxng](https://github.com/searxng/searxng) | 自建搜索后端，供 websearch 插件使用 |
