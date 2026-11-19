@@ -1496,7 +1496,8 @@ def get_judge_api() -> JSONResponse:
     data.setdefault("daily_limit", 50000)
     data.setdefault("judge_delay", 2.0)
     data.setdefault("reply_gap", 6)
-    data.setdefault("inflight_ttl", 90)
+    data.setdefault("inflight_ttl", 45)
+    data.setdefault("inflight_lock", True)
     data.setdefault("dup_window", 45)
     data.setdefault("dup_ratio", 0.75)
     data.setdefault("burst_gap", 15)
@@ -1533,6 +1534,7 @@ async def save_judge_api(request: Request) -> JSONResponse:
         "judge_delay",
         "reply_gap",
         "inflight_ttl",
+        "inflight_lock",
         "dup_window",
         "dup_ratio",
         "burst_gap",

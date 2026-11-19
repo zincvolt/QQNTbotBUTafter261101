@@ -101,6 +101,8 @@ DEFAULT_SEGMENTED_REPLY = {
 }
 # 每段发送的网络往返（NapCat → QQ），实测 0.2-0.4 秒
 SEGMENT_NETWORK_COST = 0.25
+# 取上沿时用最慢的一档：估长了只是多锁几秒，估短了会双发
+SEGMENT_NETWORK_UPPER = 0.4
 
 
 def _load_segmented_reply() -> dict:
@@ -169,7 +171,7 @@ def _split_segments(text: str, seg: dict) -> list[str]:
     return parts or [text]
 
 
-def _estimate_send_seconds(text: str) -> float:
+def _estimate_send_seconds(text: str, upper: bool = False) -> float:
     """估算这条回复从开始发送到全部发完需要多少秒。
 
     分段算法照抄 AstrBot ``core/pipeline/respond/stage.py`` 的
@@ -178,6 +180,9 @@ def _estimate_send_seconds(text: str) -> float:
 
     Args:
         text: 模型产出的完整回复。
+        upper: ``True`` 取最坏情况上沿（最大抖动 + 一定发生停顿 + 最慢网络）。
+            锁「正在发送」必须用上沿：取均值会有一半概率低估，估短了就会在
+            真正发完之前放开锁。上沿只在真实发完信号到达前顶一下，不会长期多锁。
 
     Returns:
         估算秒数；未开分段时返回单条发送的耗时（约 0.3 秒）。
@@ -192,17 +197,22 @@ def _estimate_send_seconds(text: str) -> float:
         chars = len(part.strip())
         if method == "human":
             delay = 0.45 + chars / 7.0
-            delay *= 1.05  # uniform(0.75, 1.35) 的均值
-            delay += 0.195  # 15% 概率额外 0.8~1.8s 的期望
-            delay = min(delay, 5.5)
+            if upper:
+                # 与 AstrBot 同序：先乘抖动、再加停顿、最后截断
+                delay = min(delay * 1.35 + 1.8, 5.5)
+            else:
+                delay *= 1.05  # uniform(0.75, 1.35) 的均值
+                delay += 0.195  # 15% 概率额外 0.8~1.8s 的期望
+                delay = min(delay, 5.5)
         elif method == "log":
             import math
 
-            delay = math.log(chars + 1, max(1.1, seg["log_base"])) + 0.25
+            base = math.log(chars + 1, max(1.1, seg["log_base"]))
+            delay = base + (0.5 if upper else 0.25)  # uniform(base, base+0.5)
         else:
             low, high = seg["interval"]
-            delay = (low + high) / 2
-        total += delay + SEGMENT_NETWORK_COST
+            delay = high if upper else (low + high) / 2
+        total += delay + (SEGMENT_NETWORK_UPPER if upper else SEGMENT_NETWORK_COST)
     return total
 
 
@@ -407,6 +417,8 @@ def load_judge_api_config() -> dict:
         "judge_delay": 2.0,
         "reply_gap": 6,
         "inflight_ttl": 45,
+        # 在途硬锁：回复正在生成/分段发送时，@ 它和唤醒前缀也一并挡掉
+        "inflight_lock": True,
         "dup_window": 45,
         "dup_ratio": 0.75,
         # 话段聚合：很多人一句话拆成两三句发。等这一口气说完再判一次，
@@ -467,6 +479,7 @@ def load_judge_api_config() -> dict:
         "judge_delay": _as_float(raw.get("judge_delay"), 2.0, 0.0, 10.0),
         "reply_gap": _as_int(raw.get("reply_gap"), 6, 0, 600),
         "inflight_ttl": _as_int(raw.get("inflight_ttl"), 45, 10, 600),
+        "inflight_lock": bool(raw.get("inflight_lock", True)),
         "dup_window": _as_int(raw.get("dup_window"), 45, 0, 600),
         "dup_ratio": _as_float(raw.get("dup_ratio"), 0.75, 0.0, 1.0),
         "burst_enable": bool(raw.get("burst_enable", True)),
@@ -1107,10 +1120,11 @@ class GroupChatContext:
             self._judge_cache_map.pop(key, None)
 
     def note_bot_reply(self, umo: str, text: str) -> None:
-        """模型生成完了：记下这句话，并按「分段发送耗时」推算真正发完的时刻。
+        """模型生成完了：先按「发送耗时上沿」把在途锁顶住。
 
         分段发送是 AstrBot 自带功能，每段之间都会 sleep，所以「生成完」不等于
-        「发完」。冷却必须从发完开始算，否则发送期间和刚发完的几秒会漏挡。
+        「发完」。这里只是**兜底**：真实发完会由 ``note_message_sent`` 立刻
+        收敛，所以上沿取最坏情况（宁可多锁几秒，也不能提前放开）。
 
         Args:
             umo: Unified message origin.
@@ -1123,17 +1137,48 @@ class GroupChatContext:
         if not text:
             return
         now = time.time()
-        est = _estimate_send_seconds(text)
+        est = _estimate_send_seconds(text, upper=True)
         self._last_bot[umo] = text[:200]
         # 记发言区间（开始 ~ 预计发完），判断「骂的是不是它」要用
         self._last_bot_span[umo] = (now, now + est)
         gap = load_judge_api_config()["reply_gap"]
-        # 发送期间算「在途」（召唤词也要让路），发完之后才开始 reply_gap 冷却
+        # 发送期间算「在途」（召唤词也要让路），发完之后才开始 reply_gap 冷却。
+        # 真正的发完时刻由 after_message_sent 送进来（note_message_sent）。
         self._inflight_until[umo] = now + est
         self._cool_until[umo] = now + est + max(0, gap)
         logger.info(
-            f"group judge | 分段发送估算 {est:.1f}s，之后冷却 {max(0, gap)}s"
+            f"group judge | 发送耗时上沿 {est:.1f}s，等真实发完信号收敛"
         )
+
+    def note_message_sent(self, umo: str, owned: bool = False) -> None:
+        """消息真的发完了（``after_message_sent``）：立刻释放在途，冷却从此起算。
+
+        这是「正在回复时完全锁死」的收尾：只要 ``after_message_sent`` 到了，
+        说明所有分段都发完（它是分段循环与 sleep 之后才触发的），不需要再靠
+        估算猜。
+
+        Args:
+            umo: Unified message origin.
+            owned: 这条发送是否由本插件的接话/唤醒判定引起。防止别的插件
+                推送消息时，把我们的在途锁提前放掉。
+        """
+        if not is_third_party_mode():
+            return
+        now = time.time()
+        if self._inflight_until.get(umo, 0.0) <= now:
+            # 没有在途：别顺手给群加冷却（别的插件发消息也会触发这个钩子）
+            return
+        if not owned:
+            logger.debug(f"group judge | 非本插件触发的发送完成，保留在途锁 | {umo}")
+            return
+        gap = load_judge_api_config()["reply_gap"]
+        self._inflight_until[umo] = 0.0
+        self._cool_until[umo] = now + max(0, gap)
+        span = self._last_bot_span.get(umo)
+        if span:
+            # 把「预计发完」收敛成真实发完，判断「骂的是不是它」才准
+            self._last_bot_span[umo] = (span[0], now)
+        logger.info(f"group judge | 发送完成，冷却从此刻起算 {max(0, gap)}s")
 
     def _inflight_for(self, umo: str) -> float:
         """Seconds until the in-flight reply slot frees up (strictly "sending now")."""
@@ -1490,6 +1535,43 @@ class GroupChatContext:
 
     async def on_req_llm(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
         umo = event.unified_msg_origin
+        # 在途硬锁：正在回复（生成中或分段发送中）时，@ 它 / 唤醒前缀也不放行。
+        #
+        # 为什么必须在这里挡：``need_active_reply`` 第一句就是
+        # ``if event.is_at_or_wake_command: return False``，@ 走的是 AstrBot
+        # 内置回复通道，压根不经过那套判定，所以只靠判官挡不住「回复到一半
+        # 又被 @ 一次」的双发。
+        #
+        # 这个钩子停掉事件，pipeline 会直接放弃本次 LLM 调用（见
+        # ``process_stage`` 的 ``if await call_event_hook(...): return``）。
+        if (
+            event.is_at_or_wake_command
+            and event.get_message_type() == MessageType.GROUP_MESSAGE
+            and is_third_party_mode()
+        ):
+            api_cfg = load_judge_api_config()
+            # 指令优先：@ 它 + /reset 这类明确指令不该被聊天锁吞掉
+            is_command = bool(event.get_extra("handlers_parsed_params"))
+            if api_cfg.get("inflight_lock", True) and not is_command:
+                # 同一条消息可能多轮进这里（工具调用循环），只处理第一轮
+                if not event.get_extra("_judge_inflight_owned"):
+                    remain = self._inflight_for(umo)
+                    if remain > 0:
+                        logger.info(
+                            f"group judge | 在途硬锁，@/唤醒被挡(剩{remain:.1f}s) "
+                            f"| {(event.message_str or '')[:30]}"
+                        )
+                        event.stop_event()
+                        return
+                    # @ 的回复本身也要占住在途：否则它分段发送的这几秒里，
+                    # 别人再喊它，判官会当成新话又回一条。
+                    # 预算已由 handle_message 记过，这里不再重复计数。
+                    now = time.time()
+                    self._inflight_until[umo] = now + api_cfg["inflight_ttl"]
+                    self._last_trigger[umo] = (now, (event.message_str or "")[:200])
+                    event.set_extra("_judge_inflight_owned", True)
+                    logger.info("group judge | 唤醒/点名已占在途锁")
+
         record_id = event.get_extra("_group_context_record_id", None)
         prompt_idx = event.get_extra("_group_context_raw_idx", -1)
         if not isinstance(record_id, str) and (

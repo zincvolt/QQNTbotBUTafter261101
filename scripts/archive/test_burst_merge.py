@@ -74,6 +74,12 @@ def test_send_estimate():
     check("三段短句估算在 2-6 秒", 2.0 < many_short < 6.0, True)
     check("单句估算>0", one_long > 0.5, True)
 
+    text = "第一句话。第二句话。第三句话。"
+    mean = gcc._estimate_send_seconds(text)
+    upper = gcc._estimate_send_seconds(text, upper=True)
+    check("上沿严格大于均值（锁在途必须用上沿）", upper > mean, True)
+    check("上沿按最坏抖动+停顿算 > 2 倍均值", upper > mean * 2, True)
+
     parts = gcc._split_segments("第一句。第二句！第三句？", seg)
     check("正则切出 3 段", len(parts), 3)
 
@@ -95,6 +101,119 @@ def test_note_reply():
     check("本地模式零侵入", ctx2._inflight_until, {})
     check("本地模式不记发言区间", ctx2._last_bot_span, {})
     gcc.is_third_party_mode = lambda: True
+
+
+def test_sent_signal():
+    print("\n[3b] 真实发完信号（after_message_sent）")
+    gcc.is_third_party_mode = lambda: True
+    ctx = new_ctx()
+    ctx.note_bot_reply(UMO, "第一句话。第二句话。")
+    check("生成完先按上沿锁住", ctx._inflight_for(UMO) > 3, True)
+
+    # 非本插件触发的发送完成：不能顺手把在途放掉
+    ctx.note_message_sent(UMO, owned=False)
+    check("非本插件发送不动在途", ctx._inflight_for(UMO) > 3, True)
+
+    ctx.note_message_sent(UMO, owned=True)
+    check("真实发完立刻释放在途", round(ctx._inflight_for(UMO)), 0)
+    check("冷却从发完起算", ctx._suppressed_for(UMO) > 0, True)
+    span = ctx._last_bot_span.get(UMO)
+    check("发言区间收敛到真实发完", bool(span) and span[1] <= time.time() + 0.5, True)
+
+    # 没有在途时，别的回复发完不应给群加冷却
+    ctx2 = new_ctx()
+    ctx2.note_message_sent(UMO, owned=True)
+    check("无在途时不凭空加冷却", ctx2._cool_until, {})
+
+    gcc.is_third_party_mode = lambda: False
+    ctx3 = new_ctx()
+    ctx3.note_message_sent(UMO, owned=True)
+    check("本地模式不写任何状态", ctx3._cool_until, {})
+    gcc.is_third_party_mode = lambda: True
+
+
+class FakeEvent:
+    """够 on_req_llm 的 @ 拦截分支用，不构造真实 AstrBot 事件。"""
+
+    def __init__(self, text, at=True, command=False):
+        self.unified_msg_origin = UMO
+        self.message_str = text
+        self.is_at_or_wake_command = at
+        self._extra = {"handlers_parsed_params": {"k": "v"}} if command else {}
+        self.stopped = False
+
+    def get_extra(self, key, default=None):
+        return self._extra.get(key, default)
+
+    def get_message_type(self):
+        return gcc.MessageType.GROUP_MESSAGE
+
+    def set_extra(self, key, value):
+        self._extra[key] = value
+
+    def stop_event(self):
+        self.stopped = True
+
+
+async def test_at_hard_lock():
+    print("\n[8] 正在回复时 @ 它 / 唤醒前缀硬锁")
+    gcc.is_third_party_mode = lambda: True
+    ctx = new_ctx()
+
+    # 无在途：这条 @ 先占住在途，然后才允许生成
+    ev = FakeEvent("阿灰你说啥")
+    await ctx.on_req_llm(ev, None)
+    check("@ 触发的回复自己占在途", ctx._inflight_for(UMO) > 0, True)
+    check("@ 首次不被拦", ev.stopped, False)
+    check("已标记本插件认领", bool(ev.get_extra("_judge_inflight_owned")), True)
+
+    # 在途期间再来一条 @：必须停掉事件（pipeline 因此不调 LLM）
+    ev2 = FakeEvent("阿灰在吗")
+    await ctx.on_req_llm(ev2, None)
+    check("在途期间 @ 被停事件", ev2.stopped, True)
+
+    # 同一条消息多轮工具调用：已认领的不再被自己拦
+    ev3 = FakeEvent("阿灰你说啥")
+    ev3.set_extra("_judge_inflight_owned", True)
+    await ctx.on_req_llm(ev3, None)
+    check("同一事件多轮不被自己拦", ev3.stopped, False)
+
+    # @ + 明确指令：不该被聊天锁吞掉
+    ev4 = FakeEvent("/reset", command=True)
+    await ctx.on_req_llm(ev4, None)
+    check("@ + 指令不被聊天锁拦", ev4.stopped, False)
+
+    # 非 @ 的普通消息不走这里（由判官那套处理）
+    ev5 = FakeEvent("今天吃啥")
+    ev5.is_at_or_wake_command = False
+    await ctx.on_req_llm(ev5, None)
+    check("普通消息不被这里拦", ev5.stopped, False)
+
+    # 关掉 inflight_lock 就退回原行为
+    ctx2 = new_ctx()
+    ctx2._inflight_until[UMO] = time.time() + 30
+    off = dict(CFG)
+    off["inflight_lock"] = False
+    gcc.load_judge_api_config = lambda: off
+    try:
+        ev6 = FakeEvent("阿灰在吗")
+        await ctx2.on_req_llm(ev6, None)
+        check("inflight_lock=off 时不拦 @", ev6.stopped, False)
+    finally:
+        gcc.load_judge_api_config = load_judge_api_config
+
+    gcc.is_third_party_mode = lambda: False
+    try:
+        ctx3 = new_ctx()
+        deadline = time.time() + 30
+        ctx3._inflight_until[UMO] = deadline
+        ev7 = FakeEvent("阿灰在吗")
+        await ctx3.on_req_llm(ev7, None)
+        check("本地模式完全不拦", ev7.stopped, False)
+        check("本地模式不占在途", ctx3._inflight_until.get(UMO) == deadline, True)
+    finally:
+        gcc.is_third_party_mode = lambda: True
+
 
 
 def test_break_rules():
@@ -189,10 +308,12 @@ def main():
     test_suppression()
     test_send_estimate()
     test_note_reply()
+    test_sent_signal()
     test_break_rules()
     test_burst_block()
     test_burst_text()
     asyncio.run(test_settle_relay())
+    asyncio.run(test_at_hard_lock())
     print()
     if failures:
         print(f"FAILED: {len(failures)} -> {failures}")

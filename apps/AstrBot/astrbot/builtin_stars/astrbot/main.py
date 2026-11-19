@@ -218,6 +218,8 @@ class Main(star.Star):
                         logger.error(e)
 
             if need_active:
+                # 标记这次发送由本插件认领：发完后才允许释放在途锁
+                event.set_extra("_judge_inflight_owned", True)
                 provider = await self.context.get_using_provider_async(
                     event.unified_msg_origin
                 )
@@ -355,6 +357,15 @@ class Main(star.Star):
     async def after_message_sent(self, event: AstrMessageEvent) -> None:
         """消息发送后处理"""
         if self.group_chat_context and self.group_context_enabled(event):
+            try:
+                # 所有分段都发完了（这个钩子在 send 循环之后触发）：
+                # 释放在途锁，回复后冷却从这一刻开始算，不再靠耗时估算猜
+                self.group_chat_context.note_message_sent(
+                    event.unified_msg_origin,
+                    owned=bool(event.get_extra("_judge_inflight_owned")),
+                )
+            except Exception as exc:  # noqa: BLE001 - 锁失效很难查，不能静默
+                logger.warning(f"note_message_sent failed: {exc}")
             try:
                 clean_session = event.get_extra("_clean_group_context_session", False)
                 if clean_session:

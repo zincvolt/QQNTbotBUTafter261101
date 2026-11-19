@@ -362,6 +362,13 @@
         <input type="checkbox" id="jaBurstEnable">
         启用话段聚合（关掉＝退回逐条判定，不等待、不复用）
       </label>
+      <label style="display:flex;align-items:center;gap:10px;color:var(--text);margin-top:10px">
+        <input type="checkbox" id="jaInflightLock">
+        在途硬锁（回复正在生成或分段发送时，@ 它、唤醒前缀也一律不接）
+      </label>
+      <div class="hint" style="margin-top:4px">
+        发完的时刻由 AstrBot 的「消息发送后」钩子送来，不靠估算猜；估算只做兜底，且按最坏情况取上沿。
+      </div>
       <div class="two" style="margin-top:6px">
         <div>
           <label>静默等待秒数（期间又来消息就交给最新那条）</label>
@@ -931,6 +938,7 @@ async function loadJudgeApi() {
   document.getElementById('jaChars').value = j.recent_chars ?? 60;
   document.getElementById('jaFallback').value = j.fallback_chance ?? 0.3;
   document.getElementById('jaBurstEnable').checked = j.burst_enable !== false;
+  document.getElementById('jaInflightLock').checked = j.inflight_lock !== false;
   document.getElementById('jaSettle').value = j.burst_settle ?? 3.5;
   document.getElementById('jaBurstGap').value = j.burst_gap ?? 15;
   document.getElementById('jaBurstReuse').value = j.burst_reuse ?? 45;
@@ -968,6 +976,7 @@ async function saveJudgeApi() {
     cache_seconds: Number(document.getElementById('jaCache').value) || 0,
     recent_chars: Number(document.getElementById('jaChars').value) || 60,
     burst_enable: document.getElementById('jaBurstEnable').checked,
+    inflight_lock: document.getElementById('jaInflightLock').checked,
     burst_settle: numOr('jaSettle', 3.5),
     burst_gap: numOr('jaBurstGap', 15),
     burst_reuse: numOr('jaBurstReuse', 45),

@@ -97,7 +97,7 @@ stop-all.ps1           一键停止
 3. 按主题查 [docs/](docs/) 下其他文档
 4. 改完代码跑 `scripts/verify.ps1` 验证（尤其 AstrBot 升级后查补丁是否还在）
 5. **判官有两套互不干扰的配置**：本地模式用 `data/judge.json` + 8082；第三方模式用 `data/judge_api.json` + API，按主模型 provider 自动切换，细节见 [docs/THIRD-PARTY-API.md](docs/THIRD-PARTY-API.md) §14
-6. **话段聚合与省 token**（一句话别回四遍，也别不理人）：很多人把一句话拆成两三句发，判官会等这一口气说完（`burst_settle`）再判一次；这一段判过/回过后不再送判官（`burst_reuse`），但叫它名字或骂到它头上会按规则破例。字段都在 `data/judge_api.json`，控制台「判官 → 话段聚合」可调，机制见 [docs/THIRD-PARTY-API.md](docs/THIRD-PARTY-API.md) §14.6、兼容性清单见 §14.7
+6. **话段聚合与省 token**（一句话别回四遍，也别不理人）：很多人把一句话拆成两三句发，判官会等这一口气说完（`burst_settle`）再判一次；这一段判过/回过后不再送判官（`burst_reuse`），但叫它名字或骂到它头上会按规则破例。回复正在生成/分段发送时开启**在途硬锁**（`inflight_lock`），连 @ 它和唤醒前缀也一并挡掉，发完（`after_message_sent` 真实信号）立刻放开。字段都在 `data/judge_api.json`，控制台「判官 → 话段聚合/在途硬锁」可调，机制见 [docs/THIRD-PARTY-API.md](docs/THIRD-PARTY-API.md) §14.6、兼容性清单见 §14.7
 
 ## 部署提示
 

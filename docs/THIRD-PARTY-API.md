@@ -458,6 +458,8 @@ AstrBot        适配器已连接，无 provider 报错       ✅
 
 第 1 步之前的**静默等待**（`burst_settle`）在锁外完成：等这一口气说完，期间又来消息就放弃，让最新那条去判。这一步是"拆句合并"的关键。
 
+**这套顺序只覆盖"要不要主动接话"。@ 它和唤醒前缀走的是 AstrBot 内置回复通道，不经过这里**，所以另有一道上层硬锁（`on_llm_request` → `event.stop_event()`），在回复在途时把它们一并挡掉，见 14.6「在途硬锁」。
+
 ### 14.2 省 token 的手段
 
 - 提示词从 550 字压到约 150 字，去掉 8 个 few-shot
@@ -482,7 +484,8 @@ AstrBot        适配器已连接，无 provider 报错       ✅
 - 面板里还能直接改**必答/免打扰关键词、追问直通正则、结果缓存秒数、每条截断字数**（这些就是省 token 的规则层，改完即时生效）
 - 密钥只写不回显，留空保存不会覆盖原值
 - 「话段聚合」一栏可调 `burst_enable` / `burst_settle` / `burst_gap` / `burst_reuse` / `reply_gap` / `summon_gap` / `dup_window` / `dup_ratio` / `break_follow`（0 即关闭对应机制），以及 `bot_names`（名字）和 `break_words`（让判官看一眼的脏话词）
-- `/判官 预算 on|off`、`/判官 概率 on|off`、`/判官 开关 on|off`、`/判官 话段 on|off`、`/判官 等待 N`、`/判官 限额 N`
+- 「在途硬锁」勾选框对应 `inflight_lock`：回复生成/分段发送期间，@ 它和唤醒前缀也一律不接
+- `/判官 预算 on|off`、`/判官 概率 on|off`、`/判官 开关 on|off`、`/判官 话段 on|off`、`/判官 锁 on|off`、`/判官 等待 N`、`/判官 限额 N`
 
 ### 14.5 注意
 
@@ -490,13 +493,15 @@ AstrBot        适配器已连接，无 provider 报错       ✅
 - 第三方模式下 8082 可以停掉省 1.8GB，但停掉后本地模式要记得先拉起
 - 改 `judge_api.json` 无需重启，下一条群消息生效
 
-### 14.6 话段聚合 + 发送耗时（2026-11-19 第三版）
+### 14.6 话段聚合 + 在途硬锁（2026-11-19 第四版）
 
-**现象**：群里连着发两三句（很多人习惯把一句话拆成两三段发），或者一句刚发完又补一句带"阿灰"，机器人会连着回三四条语义差不多的。
+**现象**：群里连着发两三句（很多人习惯把一句话拆成两三段发），或者一句刚发完又补一句带"阿灰"，机器人会连着回三四条语义差不多的；回复到一半再 @ 它一次，还会再发一条。
 
 **第一版根因判断偏了**：以为 `judge_delay` 的静默窗口在生效，其实那两行是**死代码**——它在 `_get_lock` 里面 `sleep`，而后续消息的 `handle_message` 也要拿同一把锁，被挡在外面。于是 `_record_marker` 永远不变，"来了新消息就放弃"这个分支一次都不会走。真正的效果只是"每条消息都白等 2 秒"。
 
 **第二版漏了一点：生成完 ≠ 发完**。回复是 AstrBot **分段发送**的（`platform_settings.segmented_reply`，本项目 `interval_method: human`），每段之间 `sleep`。而 `note_bot_reply` 在 `on_llm_response` 触发，那时才刚生成完，发送还没开始。所以从"生成完"开始算冷却，发送期间和刚发完的几秒都是漏挡的。
+
+**第三版还漏了两点**：① 耗时估算取的是**均值**，有一半概率估短，估短了就会在真正发完之前放开锁；② @ 它和唤醒前缀走的不是这套判定（`need_active_reply` 第一句就 `return False`），所以"回复到一半又被 @ 一次"根本没人挡。
 
 **做法：话段聚合 + 按分段配置估算发送时长**
 
@@ -507,27 +512,53 @@ AstrBot        适配器已连接，无 provider 报错       ✅
 | 静默等待 | `burst_settle`（3.5） | 判定前等 3.5 秒；期间又来消息就放弃，交给最新那条。等待在**锁外**，多条并行等，不排队 |
 | 话段间隔 | `burst_gap`（15） | 两条消息间隔小于它算同一段；中间冷场超过它就当新话题 |
 | 话段复用 | `burst_reuse`（45） | 这一段**判过或回过后**不再送判官（省 token），除非命中强触发 |
-| 发送耗时估算 | — | `_estimate_send_seconds()` 按分段配置算真实发完时刻，冷却从这里起算 |
-| 回复后冷却 | `reply_gap`（6） | 只挡"紧接着的下一条"，从**发完**开始算 |
+| 在途硬锁 | `inflight_lock`（true） | 回复生成/分段发送期间，**@ 它、唤醒前缀也一律不接**（见下文） |
+| 发送耗时上沿 | — | `_estimate_send_seconds(text, upper=True)` 取最坏情况顶住，真实发完信号一到就收敛 |
+| 回复后冷却 | `reply_gap`（6） | 只挡"紧接着的下一条"，从**真正发完**开始算 |
 | 在途上限 | `inflight_ttl`（45） | 判定通过 → 生成完的认领上限；生成失败也不会把群锁 90 秒 |
 | 召唤词间隔 | `summon_gap`（4） | 叫名字不吃冷却，但 4 秒内连叫只应一次 |
 
-**发送耗时怎么估**（`_estimate_send_seconds`，照抄 `_calc_comp_interval`）：
+**发送耗时：上沿兜底 + 真实信号收敛**
+
+不能只靠估算。"什么时候发完"有两个来源，两个都用：
 
 ```text
-human 模式：每段 = 0.45 + 字数/7，×1.05（抖动均值），+0.195（15% 概率停顿 0.8~1.8s），上限 5.5s
-每段再加 0.25s 网络往返
-三段各 5 字 ≈ 5.0s；单句 10 字 ≈ 2.6s
+兜底（生成完时）：_estimate_send_seconds(text, upper=True)
+  human 模式每段 = min((0.45 + 字数/7) × 1.35 + 1.8, 5.5)，再加 0.4s 网络
+  三段各 5 字 ≈ 11.3s（均值只有 5.0s，取均值会有一半概率估短）
+
+真实（发完后）：after_message_sent 钩子 → note_message_sent()
+  _inflight_until = 0
+  _cool_until     = now + reply_gap
+  _last_bot_span  = (start, now)     ← 发言区间收敛到真实发完
 ```
 
-算完写两个截止点：
+`after_message_sent` 在 `respond/stage.py` 的分段发送循环**和所有 sleep 之后**触发，是真正"用户已经看到消息"的时刻，比任何估算都准。估算取上沿只是为了"信号没到之前绝不能提前放开"，取均值就会漏。
+
+**在途硬锁：正在回复时，@ 也不放行**
+
+这是第三版最大的洞：`need_active_reply` 第一句是 `if event.is_at_or_wake_command: return False`，@ 和唤醒前缀**根本不进判官这套判定**，走的是 AstrBot 内置回复通道。所以判官挡得再好，回复到一半再 @ 一次还是双发。
+
+挡的位置只能往前挪到 `on_llm_request`：
 
 ```python
-self._inflight_until[umo] = now + est               # 发送期间算在途（召唤词也让路）
-self._cool_until[umo]     = now + est + reply_gap   # 冷却从真正发完开始
+if event.is_at_or_wake_command and is_third_party_mode():
+    if api_cfg["inflight_lock"] and not is_command:
+        if self._inflight_for(umo) > 0:
+            event.stop_event()   # 钩子返回 True → pipeline 放弃本次 LLM 调用
+            return
+        # 不在途：这条 @ 的回复自己先占住在途，避免它发送期间又被人喊一声
+        self._inflight_until[umo] = now + api_cfg["inflight_ttl"]
+        event.set_extra("_judge_inflight_owned", True)
 ```
 
-**效果**：拆成三句发 → 只有最后一句去判定，判官看到的是完整意思（前三句已进上下文）→ 一段只回一条。
+三个细节：
+
+- **只处理第一轮**：同一条消息可能多轮进 `on_llm_request`（工具调用循环），用 `_judge_inflight_owned` 标记，否则第二轮会被自己占的锁挡掉。
+- **指令优先**：`handlers_parsed_params` 非空的（@ 它 + `/reset`）不拦，聊天锁不该吞掉明确指令。
+- **配对释放**：只有 `_judge_inflight_owned` 的事件发完才允许 `note_message_sent` 释放在途，别的插件推送不会把我们的锁提前放掉。
+
+**效果**：拆成三句发 → 只有最后一句去判定，判官看到的是完整意思（前三句已进上下文）→ 一段只回一条；回复期间不管喊名字、@、唤醒前缀，一律等到这条发完再说。
 
 **强触发：规则只筛候选，归属交给判官**
 
@@ -553,7 +584,11 @@ self._cool_until[umo]     = now + est + reply_gap   # 冷却从真正发完开�
 - `同话段已answered/judged，不再送判官` → 省 token 生效
 - `点名打破冷却(剩Xs)` / `话段内点名，打破复用` → 叫名字破例
 - `脏话待判(剩Xs)，交给判官看骂谁` / `话段内脏话待判` → 放行给判官判归属
-- `召唤词但回复在途` → 真的正在发，避免双发
+- `发送耗时上沿 Xs，等真实发完信号收敛` → 生成完，先按最坏情况顶住
+- `发送完成，冷却从此刻起算 Ns` → 真实发完信号到了
+- `在途硬锁，@/唤醒被挡(剩Xs)` → **正在回复时 @ 它被挡住**（正常）
+- `唤醒/点名已占在途锁` → @ 的回复自己占位，发送期间不会被人再喊一遍
+- `召唤词但回复在途` → 句中叫名字也在让路
 - `召唤词间隔过密` → `summon_gap` 生效
 
 **调参**：
@@ -561,21 +596,24 @@ self._cool_until[umo]     = now + est + reply_gap   # 冷却从真正发完开�
 - 嫌回得慢：`/判官 等待 2` 或面板把 `burst_settle` 降到 2.0（拆句间隔长的群别低于 2）
 - 嫌还是连发：`reply_gap` 加到 10；确认 `segmented_reply` 没被改成 `random`（`random` 估不出准确时长）
 - 嫌话段复用太省、明显不理人：`burst_reuse` 降到 20，或把常见叫法加进 `bot_names`
+- 觉得"回复期间 @ 它也不理"太硬：`/判官 锁 off`（或面板关掉「在途硬锁」），代价是发送那几秒里 @ 会再发一条
 - 想完全退回逐条判定：`/判官 话段 off`
 
 ### 14.7 兼容性清单（别的插件、指令、实际群聊）
 
 | 场景 | 会不会被挡 | 说明 |
 |---|---|---|
-| **@ 它 / 唤醒前缀** | **不会** | `need_active_reply` 第一道就是 `if event.is_at_or_wake_command: return False`，@ 和唤醒前缀根本不进这套主动接话流程，走内置回复通道 |
+| **@ 它 / 唤醒前缀（空闲时）** | **不会** | `need_active_reply` 第一道就是 `if event.is_at_or_wake_command: return False`，@ 和唤醒前缀不走这套主动接话流程，直接走内置回复通道——所以它一定应 |
+| **@ 它 / 唤醒前缀（回复在途时）** | **会，而且是故意的** | 这是第三版最大的洞：@ 不经过 `need_active_reply`，判官挡不住。现在在 `on_llm_request` 里 `event.stop_event()` 硬挡，等这条真正发完（`after_message_sent`）再放开。`inflight_lock` 可关 |
+| @ 它 + 明确指令（`/reset`） | 不会 | `handlers_parsed_params` 非空就跳过硬锁，聊天锁不吞指令 |
 | 句中叫它名字（`summon`） | 不会 | 不吃冷却、不等静默窗口，只挡"正在发"和连叫 |
 | 其他插件（兽聚/运势/统计/OCR） | **不会** | `on_message` 的 priority 是 `maxsize - 2`（最后执行）且**从不 `stop_event()`**；各插件的指令 handler 走自己的注册，与这里的返回值无关 |
 | `/` `/` 开头的指令 | 不会 | 判定入口显式跳过 `message[0] in "/／"`，不花 token、不计入回复预算 |
 | 插件主动推送的消息 | 不进冷却 | 只有 `on_llm_response` 会 `note_bot_reply`。所以插件刚推完，bot 仍可能接一句——取舍是"宁可少挡，不误挡" |
 | 多群并发 | 互不影响 | 所有状态按 `umo` 分键，锁也按群 |
 | 重启 | 无副作用 | 全部是内存状态，重启即清空；不会把"冷却"写进配置 |
-| **本地模式** | **完全不受影响** | ① 所有判定只在 `is_third_party_mode()` 分支里；② `note_bot_reply` 开头就 `if not is_third_party_mode(): return`，本地模式连一个状态都不写。本地仍是 8082 + 8 条上下文 + 0.3 概率闸 |
-| 改了 `segmented_reply` | 估算跟着变 | 分段配置是按 mtime 缓存的，改完下一条回复就用新值；改成 `random` 模式只能估中值，精度下降 |
+| **本地模式** | **完全不受影响** | ① 所有判定只在 `is_third_party_mode()` 分支里；② `note_bot_reply` / `note_message_sent` / `on_req_llm` 的硬锁都先判 `is_third_party_mode()`，本地模式连一个状态都不写、也不拦 @。本地仍是 8082 + 8 条上下文 + 0.3 概率闸 |
+| 改了 `segmented_reply` | 估算跟着变 | 分段配置是按 mtime 缓存的，改完下一条回复就用新值。真实发完靠 `after_message_sent`，所以即使估算不准也不会提前放开；改成 `random` 也安全 |
 
 **实际群聊里的两种取舍**：
 
