@@ -357,11 +357,21 @@
         <input id="jaFallback" type="number" min="0" max="1" step="0.05" placeholder="0.3">
       </div>
 
-      <label style="margin-top:16px;color:var(--text)">连发抑制（一条话还在生成/刚发完时，同一口气的后一句不再单独回一遍）</label>
+      <label style="margin-top:16px;color:var(--text)">话段聚合（很多人一句话拆成两三句发：等这一口气说完再判一次，判过就不再送判官）</label>
       <div class="two" style="margin-top:6px">
         <div>
-          <label>判定前等待秒数（期间来了新消息就交给最新那条）</label>
-          <input id="jaDelay" type="number" min="0" max="10" step="0.5">
+          <label>静默等待秒数（期间又来消息就交给最新那条）</label>
+          <input id="jaSettle" type="number" min="0" max="10" step="0.5">
+        </div>
+        <div>
+          <label>话段间隔秒数（中间冷场超过它就算新的一段）</label>
+          <input id="jaBurstGap" type="number" min="0" max="120" step="1">
+        </div>
+      </div>
+      <div class="two" style="margin-top:12px">
+        <div>
+          <label>话段复用秒数（判过/回过后不再送判官，省 token）</label>
+          <input id="jaBurstReuse" type="number" min="0" max="600" step="5">
         </div>
         <div>
           <label>回复后静默秒数（0=不留间隔）</label>
@@ -370,16 +380,31 @@
       </div>
       <div class="two" style="margin-top:12px">
         <div>
+          <label>召唤词最短间隔秒数（防止连叫连回）</label>
+          <input id="jaSummonGap" type="number" min="0" max="120" step="1">
+        </div>
+        <div>
           <label>相似去重窗口秒数（0=关闭）</label>
           <input id="jaDupWindow" type="number" min="0" max="600" step="5">
         </div>
+      </div>
+      <div class="two" style="margin-top:12px">
         <div>
           <label>相似阈值（0.5~1，越大越严格）</label>
           <input id="jaDupRatio" type="number" min="0" max="1" step="0.05">
         </div>
+        <div>
+          <label>「刚说完」认定窗口秒数（判断骂的是不是它）</label>
+          <input id="jaBreakFollow" type="number" min="0" max="300" step="5">
+        </div>
+      </div>
+      <label style="margin-top:12px">强触发规则（0 token，冷却/话段复用期间也让它开口）</label>
+      <div class="two">
+        <div><textarea id="jaBotNames" rows="3" placeholder="阿灰&#10;灰灰"></textarea></div>
+        <div><textarea id="jaBreakWords" rows="3" placeholder="傻逼&#10;滚&#10;智障"></textarea></div>
       </div>
       <div class="hint" style="margin-top:6px">
-        回复在途最长按 90 秒认领；唤醒词不延迟，但同样受「静默」和「相似去重」约束。
+        左：它的名字/昵称，命中就直接接，不吃冷却。右：强触发词，要「上一条是它说的」或「带第二人称」才算在骂它，骂别人不会插嘴。回复在途最长按 90 秒认领。
       </div>
 
       <div style="display:grid;gap:10px;margin-top:12px">
@@ -901,10 +926,16 @@ async function loadJudgeApi() {
   document.getElementById('jaCache').value = j.cache_seconds ?? 30;
   document.getElementById('jaChars').value = j.recent_chars ?? 60;
   document.getElementById('jaFallback').value = j.fallback_chance ?? 0.3;
-  document.getElementById('jaDelay').value = j.judge_delay ?? 2;
-  document.getElementById('jaGap').value = j.reply_gap ?? 12;
+  document.getElementById('jaSettle').value = j.burst_settle ?? 3.5;
+  document.getElementById('jaBurstGap').value = j.burst_gap ?? 15;
+  document.getElementById('jaBurstReuse').value = j.burst_reuse ?? 45;
+  document.getElementById('jaGap').value = j.reply_gap ?? 6;
+  document.getElementById('jaSummonGap').value = j.summon_gap ?? 4;
   document.getElementById('jaDupWindow').value = j.dup_window ?? 45;
   document.getElementById('jaDupRatio').value = j.dup_ratio ?? 0.75;
+  document.getElementById('jaBreakFollow').value = j.break_follow ?? 30;
+  document.getElementById('jaBotNames').value = (j.bot_names || []).join('\n');
+  document.getElementById('jaBreakWords').value = (j.break_words || []).join('\n');
   document.getElementById('jaEnable').checked = j.enable !== false;
   document.getElementById('jaBudget').checked = j.budget_gate !== false;
   document.getElementById('jaChance').checked = !!j.use_reply_chance;
@@ -931,10 +962,16 @@ async function saveJudgeApi() {
     fallback_chance: Number(document.getElementById('jaFallback').value) || 0,
     cache_seconds: Number(document.getElementById('jaCache').value) || 0,
     recent_chars: Number(document.getElementById('jaChars').value) || 60,
-    judge_delay: numOr('jaDelay', 2),
-    reply_gap: numOr('jaGap', 12),
+    burst_settle: numOr('jaSettle', 3.5),
+    burst_gap: numOr('jaBurstGap', 15),
+    burst_reuse: numOr('jaBurstReuse', 45),
+    reply_gap: numOr('jaGap', 6),
+    summon_gap: numOr('jaSummonGap', 4),
     dup_window: numOr('jaDupWindow', 45),
     dup_ratio: numOr('jaDupRatio', 0.75),
+    break_follow: numOr('jaBreakFollow', 30),
+    bot_names: lines('jaBotNames'),
+    break_words: lines('jaBreakWords'),
     ignore: lines('jaIgnore'),
     force_reply: lines('jaForce'),
     followup_patterns: lines('jaFollowup'),

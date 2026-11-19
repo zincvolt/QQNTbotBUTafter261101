@@ -287,10 +287,19 @@ def load_judge_api_config() -> dict:
         "cache_seconds": 30,
         # 连发抑制：一条在生成/刚发完时，别把后一句也当成新话题再回一遍
         "judge_delay": 2.0,
-        "reply_gap": 12,
+        "reply_gap": 6,
         "inflight_ttl": 90,
         "dup_window": 45,
         "dup_ratio": 0.75,
+        # 话段聚合：很多人一句话拆成两三句发。等这一口气说完再判一次，
+        # 判过/回过的这一段不再送判官（省 token），除非命中强触发规则。
+        "burst_gap": 15,
+        "burst_settle": 3.5,
+        "burst_reuse": 45,
+        "break_words": [],
+        "bot_names": [],
+        "break_follow": 30,
+        "summon_gap": 4,
         "daily_limit": 50000,
         "used": {"date": "", "tokens": 0},
         "ignore": [],
@@ -337,10 +346,17 @@ def load_judge_api_config() -> dict:
         "fallback_chance": _as_float(raw.get("fallback_chance"), 0.3, 0.0, 1.0),
         "cache_seconds": _as_int(raw.get("cache_seconds"), 30, 0, 3600),
         "judge_delay": _as_float(raw.get("judge_delay"), 2.0, 0.0, 10.0),
-        "reply_gap": _as_int(raw.get("reply_gap"), 12, 0, 600),
+        "reply_gap": _as_int(raw.get("reply_gap"), 6, 0, 600),
         "inflight_ttl": _as_int(raw.get("inflight_ttl"), 90, 10, 600),
         "dup_window": _as_int(raw.get("dup_window"), 45, 0, 600),
         "dup_ratio": _as_float(raw.get("dup_ratio"), 0.75, 0.0, 1.0),
+        "burst_gap": _as_int(raw.get("burst_gap"), 15, 0, 120),
+        "burst_settle": _as_float(raw.get("burst_settle"), 3.5, 0.0, 10.0),
+        "burst_reuse": _as_int(raw.get("burst_reuse"), 45, 0, 600),
+        "break_words": _words("break_words"),
+        "bot_names": _words("bot_names"),
+        "break_follow": _as_int(raw.get("break_follow"), 30, 0, 300),
+        "summon_gap": _as_int(raw.get("summon_gap"), 4, 0, 120),
         "daily_limit": _as_int(raw.get("daily_limit"), 50000, 0, 10_000_000),
         "used": {
             "date": str(used.get("date") or ""),
@@ -421,9 +437,15 @@ class GroupChatContext:
         self._reply_times: dict[str, deque[float]] = defaultdict(deque)
         # 第三方判官运行时状态
         self._last_bot: dict[str, str] = {}
-        # 连发抑制：待回/刚回的截止时间，以及上次触发回复的消息
-        self._pending_until: dict[str, float] = {}
+        # 连发抑制：在途截止时间、刚回过话的冷却截止时间、上次触发回复的消息
+        self._inflight_until: dict[str, float] = {}
+        self._cool_until: dict[str, float] = {}
         self._last_trigger: dict[str, tuple[float, str]] = {}
+        # 话段聚合：消息到达时间（判断同一口气说完了没）
+        self._last_arrival: dict[str, float] = {}
+        self._prev_arrival: dict[str, float] = {}
+        self._last_bot_at: dict[str, float] = {}
+        self._burst: dict[str, dict] = {}
         self._judge_cache_map: dict[tuple[str, str], tuple[float, bool]] = {}
         self._judge_fail = 0
         self._judge_cooldown_until = 0.0
@@ -526,7 +548,8 @@ class GroupChatContext:
                 break
 
         # 第三方模式走独立的一套：规则前置 + 短提示词 + 独立密钥/额度
-        # 召唤词也交给它处理：要过快慢判定，但不能绕过「刚回过话就别再回」的抑制
+        # 召唤词交给它处理：跳过静默等待、不吃「刚回过话」的冷却（叫了就该应），
+        # 但仍然只允许一条回复在途，避免并发双发
         if is_third_party_mode():
             return await self._need_active_reply_api(event, cfg, api_cfg, summon_hit)
 
@@ -571,7 +594,36 @@ class GroupChatContext:
         Returns:
             True when the bot should chime in.
         """
-        async with self._get_lock(event.unified_msg_origin):
+        umo = event.unified_msg_origin
+        now = time.time()
+        # 每条消息都记一次到达时间：话段聚合靠它判断「这一口气说完了没」。
+        # 这个时间戳必须在锁外写，否则后续消息会被锁挡住、永远看不见。
+        self._prev_arrival[umo] = self._last_arrival.get(umo, 0.0)
+        self._last_arrival[umo] = now
+        state = self._burst.get(umo)
+        if state and now - state.get("last", 0.0) <= api_cfg["burst_gap"]:
+            state["last"] = now
+
+        # 召唤词要快：跳过静默等待，进锁后也只看「是不是真的正在发」
+        if summon_hit:
+            async with self._get_lock(umo):
+                return await self._need_active_reply_api_inner(
+                    event, cfg, api_cfg, summon_hit
+                )
+
+        # 等这一口气说完。等待期间又来消息就放弃，让最新那条去判——
+        # 这样拆成两三句发的内容会被合成一段判一次，既不漏也不重复。
+        settle = api_cfg["burst_settle"]
+        if settle > 0 and (event.message_str or "").strip():
+            await asyncio.sleep(settle)
+            if self._last_arrival.get(umo, 0.0) != now:
+                logger.info(
+                    f"group judge | 话段未说完，交给最新一条 "
+                    f"| {(event.message_str or '')[:30]}"
+                )
+                return False
+
+        async with self._get_lock(umo):
             return await self._need_active_reply_api_inner(
                 event, cfg, api_cfg, summon_hit
             )
@@ -583,8 +635,10 @@ class GroupChatContext:
 
         一条回复从判定到真正发出去要好几秒，这期间同一口气发来的后续消息
         如果各自都过一遍判定，就会连着发出几条语义差不多的回复。所以按
-        「回复在途/刚发完 → 条数限制 → 规则层 → 相似去重 → 静默窗口 → 模型」
-        的顺序挡，越靠前越省 token，唤醒词也不越过前两道。
+        「召唤词 → 回复在途 → 刚回过话的冷却 → 条数限制 → 规则层 →
+        话段复用（省 token）→ 相似去重 → 模型」的顺序挡，越靠前越省 token。
+
+        冷却和话段复用都不是硬墙：叫它名字、骂到它头上，规则会让它破例接一句。
 
         Args:
             event: Incoming group message.
@@ -599,30 +653,50 @@ class GroupChatContext:
         message = (event.message_str or "").strip()
         if not message:
             return False
-
-        # 1) 回复在途，或刚发完仍在间隔里：同一口气只回一次（唤醒词也受这条约束）
-        remain = self._suppressed_for(umo)
-        if remain > 0:
-            logger.info(
-                f"group judge | 连发抑制(剩{remain:.0f}s, summon={summon_hit or '-'}) "
-                f"| {message[:30]}"
-            )
+        # 指令不是聊天内容：别花判官的 token，也别算进回复预算
+        if message[0] in "/／":
             return False
 
-        # 2) 条数限制前处理：超了就不花 token（开关：budget_gate）
+        # 1) 召唤词：不等静默窗口，也不吃「刚回过话」的冷却（叫了就该应），
+        #    只挡「回复真的正在发」和「几秒内又叫了一次」
+        if summon_hit:
+            if self._inflight_for(umo) > 0:
+                logger.info(f"group judge | 召唤词但回复在途 | {message[:30]}")
+                return False
+            prev = self._last_trigger.get(umo)
+            if prev and time.time() - prev[0] < api_cfg["summon_gap"]:
+                logger.info(f"group judge | 召唤词间隔过密 | {message[:30]}")
+                return False
+            if self._too_similar(umo, message, api_cfg):
+                return False
+            logger.info(f"group judge | 召唤词({summon_hit})直通 | {message[:30]}")
+            self._mark_trigger(umo, message, api_cfg)
+            self._mark_burst(umo, "answered", api_cfg)
+            return True
+
+        # 2) 回复正在生成/发送：并发会连发，先挡
+        if self._inflight_for(umo) > 0:
+            logger.info(f"group judge | 回复在途 | {message[:30]}")
+            return False
+
+        # 3) 刚回过话的冷却期：默认不接，但骂到它头上、又叫了它，规则直接打破
+        remain = self._suppressed_for(umo)
+        if remain > 0:
+            if not self._break_allowed(umo, message, api_cfg, summon_hit):
+                logger.info(
+                    f"group judge | 连发抑制(剩{remain:.0f}s) | {message[:30]}"
+                )
+                return False
+            logger.info(
+                f"group judge | 强触发打破冷却(剩{remain:.0f}s) | {message[:30]}"
+            )
+
+        # 4) 条数限制前处理：超了就不花 token（开关：budget_gate）
         if api_cfg.get("budget_gate", True):
             over, used = self._over_budget(umo)
             if over:
                 logger.info(f"group judge | 条数限制({used})前置拦截 | {message[:30]}")
                 return False
-
-        # 3) 唤醒词：不延迟（要快），但仍要过相似去重
-        if summon_hit:
-            if self._too_similar(umo, message, api_cfg):
-                return False
-            logger.info(f"group judge | 召唤词({summon_hit})直通 | {message[:30]}")
-            self._mark_trigger(umo, message, api_cfg)
-            return True
 
         for kw in api_cfg["ignore"]:
             if kw and kw in message:
@@ -650,7 +724,15 @@ class GroupChatContext:
                     return True
             except re.error:
                 continue
-        if len(message) <= 3:
+        # 5) 话段复用：这一段已经判过/回过了，就不再送判官（省 token）。
+        #    强触发（骂它、叫它）在 _break_allowed 里已经放行，不会卡死。
+        if self._burst_blocked(umo, message, api_cfg):
+            return False
+
+        # 6) 过短：按合并后的话段长度判断。很多人把一句话拆成两三句发，
+        #    「就是」「然后呢」单独看没意义，单独挡掉就等于不理人。
+        merged = self._burst_text(umo, message, api_cfg)
+        if len(merged) <= 3:
             logger.info(f"group judge | 过短不接 | {message[:20]}")
             return False
 
@@ -659,49 +741,40 @@ class GroupChatContext:
             logger.info(f"group judge | 复读不接 | {message[:20]}")
             return False
 
-        # 4) 相似去重：和刚触发过回复的那句几乎一样，就不再判一次
+        # 7) 相似去重：和刚触发过回复的那句几乎一样，就不再判一次
         if self._too_similar(umo, message, api_cfg):
             return False
-
-        # 5) 静默窗口：先等一会儿，让同一口气的后半句落地
-        delay = api_cfg["judge_delay"]
-        if delay > 0:
-            marker = self._record_marker(umo)
-            await asyncio.sleep(delay)
-            if self._record_marker(umo) != marker:
-                logger.info(
-                    f"group judge | 等待{delay:g}s内来了新消息，交由最新一条判定 "
-                    f"| {message[:30]}"
-                )
-                return False
-            if self._suppressed_for(umo) > 0:
-                logger.info(f"group judge | 等待期间已回复，本轮放弃 | {message[:30]}")
-                return False
 
         # 关掉第三方判官：不碰 8082，直接规则 + 概率兜底
         if not api_cfg["enable"]:
             logger.info("group judge | 第三方判官已关，走规则+概率")
             if random.random() < api_cfg["fallback_chance"]:
                 self._mark_trigger(umo, message, api_cfg)
+                self._mark_burst(umo, "answered", api_cfg)
                 return True
             return False
 
         verdict = await self._judge_api(umo, message, records, api_cfg)
         if verdict is None:
-            # 失败/超限/熔断：概率兜底，不硬中断
+            # 失败/超限/熔断：概率兜底，不硬中断（也不标记话段，等下次重试）
             if random.random() < api_cfg["fallback_chance"]:
                 self._mark_trigger(umo, message, api_cfg)
+                self._mark_burst(umo, "answered", api_cfg)
                 return True
             return False
         if not verdict:
+            # 判官说不接：这一段就别再反复送了，省下后面的 token
+            self._mark_burst(umo, "judged", api_cfg)
             return False
         if api_cfg["use_reply_chance"] and random.random() >= api_cfg["reply_chance"]:
             logger.info(
                 f"group judge | API 概率闸拦截 "
                 f"(chance={api_cfg['reply_chance']:.2f}) | {message[:30]}"
             )
+            self._mark_burst(umo, "judged", api_cfg)
             return False
         self._mark_trigger(umo, message, api_cfg)
+        self._mark_burst(umo, "answered", api_cfg)
         return True
 
     async def _judge_api(
@@ -874,12 +947,20 @@ class GroupChatContext:
 
     def note_bot_reply(self, umo: str, text: str) -> None:
         """Remember the bot's latest line so the judge can read follow-ups."""
+        now = time.time()
         text = (text or "").strip()
         if text:
             self._last_bot[umo] = text[:200]
-        # 真正发完了：在途标记收敛成「刚回过话」的间隔，避免下一条消息立刻再接
+            self._last_bot_at[umo] = now
+        # 真正发完了：在途标记清掉，收敛成「刚回过话」的短冷却。
+        # 冷却只挡「紧接着的下一条」，不挡叫它名字/骂到它头上——那是 _break_allowed 的事。
         gap = load_judge_api_config()["reply_gap"]
-        self._pending_until[umo] = time.time() + max(0, gap)
+        self._inflight_until[umo] = 0.0
+        self._cool_until[umo] = now + max(0, gap)
+
+    def _inflight_for(self, umo: str) -> float:
+        """Seconds until the in-flight reply slot frees up (strictly "sending now")."""
+        return max(0.0, self._inflight_until.get(umo, 0.0) - time.time())
 
     def _suppressed_for(self, umo: str) -> float:
         """还有多少秒处于「回复在途 / 刚回过话」的抑制期。
@@ -890,20 +971,123 @@ class GroupChatContext:
         Returns:
             Remaining seconds; 0 when the bot may reply again.
         """
-        return max(0.0, self._pending_until.get(umo, 0.0) - time.time())
+        now = time.time()
+        return max(
+            0.0,
+            self._inflight_until.get(umo, 0.0) - now,
+            self._cool_until.get(umo, 0.0) - now,
+        )
 
     def _mark_trigger(self, umo: str, message: str, api_cfg: dict) -> None:
         """Reserve the slot: one reply per burst, and remember what triggered it."""
+        now = time.time()
         self._note_reply(umo)
-        self._pending_until[umo] = time.time() + api_cfg["inflight_ttl"]
-        self._last_trigger[umo] = (time.time(), message[:200])
+        self._inflight_until[umo] = now + api_cfg["inflight_ttl"]
+        self._cool_until.pop(umo, None)
+        self._last_trigger[umo] = (now, message[:200])
 
-    def _record_marker(self, umo: str) -> tuple[int, str]:
-        """Cheap fingerprint of the group's message stream, used to spot new arrivals."""
-        ids = self._record_ids.get(umo)
-        if ids:
-            return (len(ids), ids[-1])
-        return (len(self.raw_records.get(umo) or ()), "")
+    def _mark_burst(self, umo: str, why: str, api_cfg: dict) -> None:
+        """Mark this burst as already judged/answered so it stops costing tokens."""
+        now = time.time()
+        self._burst[umo] = {
+            "last": now,
+            "until": now + api_cfg["burst_reuse"],
+            "why": why,
+        }
+
+    def _burst_blocked(self, umo: str, message: str, api_cfg: dict) -> bool:
+        """同一话段已经判过/回过，就别再送判官（省 token）；强触发可打破。
+
+        Args:
+            umo: Unified message origin.
+            message: Incoming text.
+            api_cfg: Third-party judge profile.
+
+        Returns:
+            True when this message should be skipped without calling the judge.
+        """
+        state = self._burst.get(umo)
+        if not state:
+            return False
+        now = time.time()
+        if now >= float(state.get("until") or 0):
+            self._burst.pop(umo, None)
+            return False
+        if now - float(state.get("last") or 0) > api_cfg["burst_gap"]:
+            # 中间冷场超过 burst_gap，算新的一段
+            self._burst.pop(umo, None)
+            return False
+        # 省 token 不能省到「骂它也不吭声」：强触发随时可以打破复用
+        if self._break_allowed(umo, message, api_cfg):
+            logger.info(f"group judge | 话段内强触发，打破复用 | {message[:30]}")
+            self._burst.pop(umo, None)
+            return False
+        logger.info(
+            f"group judge | 同话段已{state.get('why') or '判过'}，不再送判官 "
+            f"| {message[:30]}"
+        )
+        return True
+
+    def _burst_text(self, umo: str, message: str, api_cfg: dict) -> str:
+        """把这一口气里的几句话拼起来，用于「是不是太短」的判断。"""
+        cutoff = time.time() - max(1, api_cfg["burst_gap"])
+        records = list(self.raw_records.get(umo, ()))
+        times = list(self._record_times.get(umo, ()))
+        parts = [message]
+        for text, when in zip(reversed(records), reversed(times)):
+            if when < cutoff:
+                break
+            stripped = _record_text(text)
+            if stripped:
+                parts.append(stripped)
+            if len(parts) >= 6:
+                break
+        return "，".join(reversed(parts))
+
+    def _bot_spoke_last(self, umo: str) -> bool:
+        """这一条之前，最近开口的是不是它自己。"""
+        last_bot = self._last_bot_at.get(umo, 0.0)
+        if not last_bot:
+            return False
+        return last_bot > self._prev_arrival.get(umo, 0.0)
+
+    def _break_allowed(
+        self, umo: str, message: str, api_cfg: dict, summon_hit: str = ""
+    ) -> bool:
+        """强触发：冷却期/话段复用期间，这句值不值得破例回一次。
+
+        完全走规则，不花 token。「往上看是不是在说自己」用两条线索：
+        有没有叫它名字，以及上一条开口的是不是它。
+
+        Args:
+            umo: Unified message origin.
+            message: Incoming text.
+            api_cfg: Third-party judge profile.
+            summon_hit: Matched wake-word, empty when none.
+
+        Returns:
+            True when the message should bypass burst suppression.
+        """
+        if summon_hit:
+            return True
+        names = [n for n in api_cfg["bot_names"] if n]
+        if any(n in message for n in names):
+            return True
+        words = [w for w in api_cfg["break_words"] if w]
+        if not words:
+            return False
+        hit = next((w for w in words if w in message), "")
+        if not hit:
+            return False
+        # 骂人的话 + 上一条是它说的 → 认定在说它
+        if self._bot_spoke_last(umo):
+            return True
+        # 骂人的话 + 第二人称 → 大概率指着它，但也不排除指着别人
+        if any(p in message for p in ("你", "您", "尼", "泥")):
+            return time.time() - self._last_bot_at.get(umo, 0.0) <= api_cfg[
+                "break_follow"
+            ]
+        return False
 
     def _too_similar(self, umo: str, message: str, api_cfg: dict) -> bool:
         """Whether this message is a near-repeat of the one that just got a reply.
@@ -1071,6 +1255,19 @@ class GroupChatContext:
             cnt = len(self.raw_records.get(umo, deque()))
             self.raw_records.pop(umo, None)
             self._record_ids.pop(umo, None)
+            self._record_times.pop(umo, None)
+            # 连发抑制/话段状态一并清掉，别让 /reset 后还带着旧冷却
+            for store in (
+                self._burst,
+                self._last_arrival,
+                self._prev_arrival,
+                self._last_bot_at,
+                self._inflight_until,
+                self._cool_until,
+                self._last_trigger,
+                self._last_bot,
+            ):
+                store.pop(umo, None)
         self._locks.pop(umo, None)
         return cnt
 

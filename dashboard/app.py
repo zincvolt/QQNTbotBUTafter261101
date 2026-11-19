@@ -1495,10 +1495,17 @@ def get_judge_api() -> JSONResponse:
     data.setdefault("use_reply_chance", False)
     data.setdefault("daily_limit", 50000)
     data.setdefault("judge_delay", 2.0)
-    data.setdefault("reply_gap", 12)
+    data.setdefault("reply_gap", 6)
     data.setdefault("inflight_ttl", 90)
     data.setdefault("dup_window", 45)
     data.setdefault("dup_ratio", 0.75)
+    data.setdefault("burst_gap", 15)
+    data.setdefault("burst_settle", 3.5)
+    data.setdefault("burst_reuse", 45)
+    data.setdefault("summon_gap", 4)
+    data.setdefault("break_follow", 30)
+    data.setdefault("bot_names", [])
+    data.setdefault("break_words", [])
     return JSONResponse(data)
 
 
@@ -1527,6 +1534,13 @@ async def save_judge_api(request: Request) -> JSONResponse:
         "inflight_ttl",
         "dup_window",
         "dup_ratio",
+        "burst_gap",
+        "burst_settle",
+        "burst_reuse",
+        "summon_gap",
+        "break_follow",
+        "bot_names",
+        "break_words",
         "daily_limit",
         "ignore",
         "force_reply",
