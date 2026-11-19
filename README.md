@@ -11,6 +11,35 @@
 - 有判官模型决定"该不该接这句话"、长期记忆、读图、发表情包、联网搜索、兽聚倒计时等指令
 - 设计取向：**宁可少说、装死，也不刷屏、不编事实**
 
+## 自研插件
+
+本项目自己写的 AstrBot 插件，每个都拆成了独立仓库（公开），可读源码与用途说明：
+
+| 插件 | 用途 |
+|---|---|
+| [astrbot-plugin-peer](https://github.com/zincvolt/astrbot-plugin-peer) | 核心人格与发言闸门：像群友一样聊天、答不上来就装死、低频水群、表情后处理 |
+| [astrbot-plugin-ltm](https://github.com/zincvolt/astrbot-plugin-ltm) | 长期记忆：抽取稳定事实、语义召回后注入提示词 |
+| [astrbot-plugin-apimode](https://github.com/zincvolt/astrbot-plugin-apimode) | 本地 / 第三方模型热切换、token 额度、按群审查 |
+| [astrbot-plugin-visionmode](https://github.com/zincvolt/astrbot-plugin-visionmode) | 读图方式切换：本地 VL / 第三方 / 关 |
+| [astrbot-plugin-vision-context](https://github.com/zincvolt/astrbot-plugin-vision-context) | 群图上下文：后台给图片生成释义并缓存，回复时按需注入 |
+| [astrbot-plugin-websearch](https://github.com/zincvolt/astrbot-plugin-websearch) | 联网搜索：接本地 SearXNG，自动 + 工具两种入口 |
+| [astrbot-plugin-furcon](https://github.com/zincvolt/astrbot-plugin-furcon) | 兽聚倒计时、每日运势、群统计，图片卡片输出 |
+
+> 这些插件在本主仓库的 `apps/AstrBot/data/plugins/` 下也各留了一份，方便整体部署；独立仓库便于单独阅读和复用。
+> 表情包管理用的是第三方插件 [anka-afk/astrbot_plugin_meme_manager](https://github.com/anka-afk/astrbot_plugin_meme_manager)，不是自研，故未建独立仓库。
+
+## 依赖的上游项目
+
+这套方案站在以下开源项目的肩膀上（链接为官方仓库）：
+
+| 项目 | 仓库 | 在本项目中的角色 |
+|---|---|---|
+| AstrBot | [AstrBotDevs/AstrBot](https://github.com/AstrBotDevs/AstrBot) | 机器人框架本体（AGPL-3.0，含本项目 6 处补丁） |
+| NapCatQQ | [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ) | QQ 协议端，跑在 QQ 进程内（⚠️ 上游已停更 / ending） |
+| LiteLoaderQQNT | [LiteLoaderQQNT/LiteLoaderQQNT](https://github.com/LiteLoaderQQNT/LiteLoaderQQNT) | QQNT 插件加载器，用于注入 NapCat |
+| OneBot v11 | [botuniverse/onebot-11](https://github.com/botuniverse/onebot-11) | NapCat 与 AstrBot 之间的通信协议规范 |
+| SearXNG | [searxng/searxng](https://github.com/searxng/searxng) | 自建搜索后端，供 websearch 插件使用 |
+
 ## 目录结构
 
 ```
