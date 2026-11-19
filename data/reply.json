@@ -2,6 +2,8 @@
   "meme_chance": 0.0,
   "reply_chance": 0.3,
   "history_minutes": 20.0,
+  "history_min_count": 3,
+  "history_fallback_count": 12,
   "text_rules": [
     {
       "pattern": "。(?=\\s|$|[（(\\[【「『])",

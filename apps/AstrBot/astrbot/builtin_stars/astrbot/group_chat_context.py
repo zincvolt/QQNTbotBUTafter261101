@@ -284,6 +284,33 @@ def load_history_window() -> float:
     return minutes * 60.0
 
 
+HISTORY_MIN_COUNT_DEFAULT = 3
+HISTORY_FALLBACK_COUNT_DEFAULT = 12
+
+
+def load_history_fallback() -> tuple[int, int]:
+    """时间窗内消息太少时改成按条数补的配置。
+
+    冷场半小时后开新话题，「最近 20 分钟」里可能只有一两句，模型等于没有
+    上下文，容易答得牛头不对马嘴。这里允许退回到「最近 N 条」——旧一点
+    也比空着强。
+
+    Returns:
+        tuple[int, int]: (窗内最少条数, 不足时补到多少条)，默认 (3, 12)。
+    """
+    min_count = HISTORY_MIN_COUNT_DEFAULT
+    count = HISTORY_FALLBACK_COUNT_DEFAULT
+    try:
+        raw = json.loads(REPLY_CONFIG_PATH.read_text(encoding="utf-8-sig"))
+        min_count = int(raw.get("history_min_count", min_count))
+        count = int(raw.get("history_fallback_count", count))
+    except (json.JSONDecodeError, OSError, TypeError, ValueError):
+        pass
+    min_count = max(1, min(20, min_count))
+    count = max(min_count, min(40, count))
+    return min_count, count
+
+
 def load_reply_budget() -> tuple[int, float]:
     """每群回复预算：(窗口内最大条数, 窗口秒数)。
 
@@ -1616,12 +1643,23 @@ class GroupChatContext:
                 for rec, ts in zip(records_to_inject, times_to_inject, strict=False)
                 if ts >= cutoff
             ]
-            if len(kept) != len(records_to_inject):
+            # 窗内太空就按条数兜底：冷场后开新话题时，模型至少知道刚才在聊什么
+            min_count, fallback_count = load_history_fallback()
+            if len(kept) < min_count < len(records_to_inject):
+                fallback = records_to_inject[-fallback_count:]
                 logger.info(
-                    f"group history window: kept {len(kept)}/{len(records_to_inject)} "
-                    f"(window {int(window/60)}min)"
+                    f"group history window: {len(kept)} msg(s) in "
+                    f"{int(window/60)}min (< {min_count}), "
+                    f"fallback to last {len(fallback)}/{fallback_count}"
                 )
-            records_to_inject = kept
+                records_to_inject = fallback
+            else:
+                if len(kept) != len(records_to_inject):
+                    logger.info(
+                        f"group history window: kept {len(kept)}/"
+                        f"{len(records_to_inject)} (window {int(window/60)}min)"
+                    )
+                records_to_inject = kept
 
         if records_to_inject:
             req.extra_user_content_parts.append(

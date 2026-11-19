@@ -117,7 +117,7 @@ git reset --hard <commit号>
 2. 长期记忆（ltm 插件，向量召回）
 3. 群图上下文（vision_context 插件，最近 3 张图释义）
 4. 联网搜索（websearch 插件，像问句时）
-5. 群聊格式 + STRICT_HINT（peer 插件）
+5. 群聊格式说明（peer 插件）
 6. 群历史块（group_chat_context，`extra_user_content_parts`）
 
 所有 `on_llm_request` 钩子按加载顺序串行改同一个 req 对象，在 `reset()` 时一次性烘焙进消息列表，工具循环各轮复用、不重复注入。
