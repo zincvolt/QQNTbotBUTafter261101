@@ -303,8 +303,8 @@ class Main(star.Star):
                     event.unified_msg_origin,
                     getattr(response, "completion_text", "") or "",
                 )
-            except Exception:
-                pass
+            except Exception as exc:  # noqa: BLE001 - 别静默吞掉，冷却失效很难查
+                logger.warning(f"note_bot_reply failed: {exc}")
 
         settings = self.context.get_config(umo=event.unified_msg_origin).get(
             "provider_ltm_settings",

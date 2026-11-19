@@ -358,6 +358,10 @@
       </div>
 
       <label style="margin-top:16px;color:var(--text)">话段聚合（很多人一句话拆成两三句发：等这一口气说完再判一次，判过就不再送判官）</label>
+      <label style="display:flex;align-items:center;gap:10px;color:var(--text);margin-top:6px">
+        <input type="checkbox" id="jaBurstEnable">
+        启用话段聚合（关掉＝退回逐条判定，不等待、不复用）
+      </label>
       <div class="two" style="margin-top:6px">
         <div>
           <label>静默等待秒数（期间又来消息就交给最新那条）</label>
@@ -404,7 +408,7 @@
         <div><textarea id="jaBreakWords" rows="3" placeholder="傻逼&#10;滚&#10;智障"></textarea></div>
       </div>
       <div class="hint" style="margin-top:6px">
-        左：它的名字/昵称，命中就直接接，不吃冷却。右：强触发词，要「上一条是它说的」或「带第二人称」才算在骂它，骂别人不会插嘴。回复在途最长按 90 秒认领。
+        左：它的名字/昵称，命中就直接接，不吃冷却。右：强触发词只负责「叫判官看一眼」，由判官结合上下文判断在骂谁，骂别人不会插嘴。发送耗时按 AstrBot 的分段配置自动估算，冷却从真正发完那一刻开始算。
       </div>
 
       <div style="display:grid;gap:10px;margin-top:12px">
@@ -926,6 +930,7 @@ async function loadJudgeApi() {
   document.getElementById('jaCache').value = j.cache_seconds ?? 30;
   document.getElementById('jaChars').value = j.recent_chars ?? 60;
   document.getElementById('jaFallback').value = j.fallback_chance ?? 0.3;
+  document.getElementById('jaBurstEnable').checked = j.burst_enable !== false;
   document.getElementById('jaSettle').value = j.burst_settle ?? 3.5;
   document.getElementById('jaBurstGap').value = j.burst_gap ?? 15;
   document.getElementById('jaBurstReuse').value = j.burst_reuse ?? 45;
@@ -962,6 +967,7 @@ async function saveJudgeApi() {
     fallback_chance: Number(document.getElementById('jaFallback').value) || 0,
     cache_seconds: Number(document.getElementById('jaCache').value) || 0,
     recent_chars: Number(document.getElementById('jaChars').value) || 60,
+    burst_enable: document.getElementById('jaBurstEnable').checked,
     burst_settle: numOr('jaSettle', 3.5),
     burst_gap: numOr('jaBurstGap', 15),
     burst_reuse: numOr('jaBurstReuse', 45),

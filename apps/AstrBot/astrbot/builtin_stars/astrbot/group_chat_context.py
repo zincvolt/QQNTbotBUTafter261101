@@ -88,6 +88,124 @@ _judge_api_cache: dict = {"mtime": 0.0, "data": None}
 PROVIDER_CONFIG_PATH = Path(r"D:\QQNTBOT\apps\AstrBot\data\cmd_config.json")
 _provider_cache: dict = {"mtime": 0.0, "id": ""}
 
+# 分段发送配置：一句话拆成几段发、每段隔多久，决定「回复真正发完」的时刻
+_segmented_cache: dict = {"mtime": 0.0, "data": None}
+DEFAULT_SEGMENTED_REPLY = {
+    "enable": False,
+    "interval_method": "random",
+    "interval": [1.5, 3.5],
+    "log_base": 2.6,
+    "split_mode": "regex",
+    "regex": r"[^。！？~…\n]+[。！？~…\n]*",
+    "split_words": ["。", "？", "！", "~", "…"],
+}
+# 每段发送的网络往返（NapCat → QQ），实测 0.2-0.4 秒
+SEGMENT_NETWORK_COST = 0.25
+
+
+def _load_segmented_reply() -> dict:
+    """读 AstrBot 的 ``platform_settings.segmented_reply``。
+
+    分段发送是 AstrBot 自带功能，每段之间会 ``sleep``。判定「回复是否还在
+    发送中」必须按这份配置算，不能拍一个固定秒数。
+
+    Returns:
+        归一化后的分段配置；读不到就用默认值（关闭）。
+    """
+    global _segmented_cache
+    try:
+        stat = PROVIDER_CONFIG_PATH.stat()
+    except OSError:
+        return DEFAULT_SEGMENTED_REPLY
+    if stat.st_mtime == _segmented_cache["mtime"] and _segmented_cache["data"]:
+        return _segmented_cache["data"]
+    data = dict(DEFAULT_SEGMENTED_REPLY)
+    try:
+        raw = json.loads(PROVIDER_CONFIG_PATH.read_text(encoding="utf-8-sig"))
+        seg = (raw.get("platform_settings") or {}).get("segmented_reply") or {}
+        if isinstance(seg, dict):
+            data["enable"] = bool(seg.get("enable", False))
+            data["interval_method"] = str(
+                seg.get("interval_method") or data["interval_method"]
+            )
+            interval = seg.get("interval")
+            if isinstance(interval, str):
+                try:
+                    parts = [float(x) for x in interval.replace(" ", "").split(",")]
+                    if len(parts) == 2:
+                        data["interval"] = parts
+                except ValueError:
+                    pass
+            try:
+                data["log_base"] = float(seg.get("log_base") or data["log_base"])
+            except (TypeError, ValueError):
+                pass
+            data["split_mode"] = str(seg.get("split_mode") or data["split_mode"])
+            data["regex"] = str(seg.get("regex") or data["regex"])
+            words = seg.get("split_words")
+            if isinstance(words, list) and words:
+                data["split_words"] = [str(w) for w in words if str(w)]
+    except (json.JSONDecodeError, OSError):
+        pass
+    _segmented_cache = {"mtime": stat.st_mtime, "data": data}
+    return data
+
+
+def _split_segments(text: str, seg: dict) -> list[str]:
+    """按 AstrBot 的规则把回复切成若干段（只要段数，不需要完全一致）。"""
+    text = (text or "").strip()
+    if not text:
+        return []
+    if seg["split_mode"] == "regex":
+        try:
+            parts = [p for p in re.findall(seg["regex"], text) if p.strip()]
+        except re.error:
+            parts = [text]
+    elif seg["split_mode"] == "words":
+        pattern = "|".join(re.escape(w) for w in seg["split_words"] if w)
+        parts = [p for p in re.split(f"({pattern})", text) if p and p.strip()]
+    else:
+        parts = [text]
+    return parts or [text]
+
+
+def _estimate_send_seconds(text: str) -> float:
+    """估算这条回复从开始发送到全部发完需要多少秒。
+
+    分段算法照抄 AstrBot ``core/pipeline/respond/stage.py`` 的
+    ``_calc_comp_interval``：human 模式每段 ``0.45 + 字数/7``，乘 0.75~1.35
+    抖动，15% 概率再停 0.8~1.8 秒，单段上限 5.5 秒；每段还有网络往返。
+
+    Args:
+        text: 模型产出的完整回复。
+
+    Returns:
+        估算秒数；未开分段时返回单条发送的耗时（约 0.3 秒）。
+    """
+    seg = _load_segmented_reply()
+    parts = _split_segments(text, seg) if seg["enable"] else [text or ""]
+    if not parts:
+        return SEGMENT_NETWORK_COST
+    method = seg["interval_method"]
+    total = 0.0
+    for part in parts:
+        chars = len(part.strip())
+        if method == "human":
+            delay = 0.45 + chars / 7.0
+            delay *= 1.05  # uniform(0.75, 1.35) 的均值
+            delay += 0.195  # 15% 概率额外 0.8~1.8s 的期望
+            delay = min(delay, 5.5)
+        elif method == "log":
+            import math
+
+            delay = math.log(chars + 1, max(1.1, seg["log_base"])) + 0.25
+        else:
+            low, high = seg["interval"]
+            delay = (low + high) / 2
+        total += delay + SEGMENT_NETWORK_COST
+    return total
+
+
 # 按群的自动接话开关，缺省等于全开
 MAIN_JUDGE_URL = "http://127.0.0.1:8080/v1/chat/completions"
 MAIN_JUDGE_KEY = "sk-llm-7d41c9e2"
@@ -288,11 +406,12 @@ def load_judge_api_config() -> dict:
         # 连发抑制：一条在生成/刚发完时，别把后一句也当成新话题再回一遍
         "judge_delay": 2.0,
         "reply_gap": 6,
-        "inflight_ttl": 90,
+        "inflight_ttl": 45,
         "dup_window": 45,
         "dup_ratio": 0.75,
         # 话段聚合：很多人一句话拆成两三句发。等这一口气说完再判一次，
         # 判过/回过的这一段不再送判官（省 token），除非命中强触发规则。
+        "burst_enable": True,
         "burst_gap": 15,
         "burst_settle": 3.5,
         "burst_reuse": 45,
@@ -347,9 +466,10 @@ def load_judge_api_config() -> dict:
         "cache_seconds": _as_int(raw.get("cache_seconds"), 30, 0, 3600),
         "judge_delay": _as_float(raw.get("judge_delay"), 2.0, 0.0, 10.0),
         "reply_gap": _as_int(raw.get("reply_gap"), 6, 0, 600),
-        "inflight_ttl": _as_int(raw.get("inflight_ttl"), 90, 10, 600),
+        "inflight_ttl": _as_int(raw.get("inflight_ttl"), 45, 10, 600),
         "dup_window": _as_int(raw.get("dup_window"), 45, 0, 600),
         "dup_ratio": _as_float(raw.get("dup_ratio"), 0.75, 0.0, 1.0),
+        "burst_enable": bool(raw.get("burst_enable", True)),
         "burst_gap": _as_int(raw.get("burst_gap"), 15, 0, 120),
         "burst_settle": _as_float(raw.get("burst_settle"), 3.5, 0.0, 10.0),
         "burst_reuse": _as_int(raw.get("burst_reuse"), 45, 0, 600),
@@ -444,7 +564,8 @@ class GroupChatContext:
         # 话段聚合：消息到达时间（判断同一口气说完了没）
         self._last_arrival: dict[str, float] = {}
         self._prev_arrival: dict[str, float] = {}
-        self._last_bot_at: dict[str, float] = {}
+        # 它这次发言的区间（开始, 预计发完），用来判断「骂的是不是它」
+        self._last_bot_span: dict[str, tuple[float, float]] = {}
         self._burst: dict[str, dict] = {}
         self._judge_cache_map: dict[tuple[str, str], tuple[float, bool]] = {}
         self._judge_fail = 0
@@ -613,7 +734,7 @@ class GroupChatContext:
 
         # 等这一口气说完。等待期间又来消息就放弃，让最新那条去判——
         # 这样拆成两三句发的内容会被合成一段判一次，既不漏也不重复。
-        settle = api_cfg["burst_settle"]
+        settle = api_cfg["burst_settle"] if api_cfg.get("burst_enable", True) else 0
         if settle > 0 and (event.message_str or "").strip():
             await asyncio.sleep(settle)
             if self._last_arrival.get(umo, 0.0) != now:
@@ -679,7 +800,8 @@ class GroupChatContext:
             logger.info(f"group judge | 回复在途 | {message[:30]}")
             return False
 
-        # 3) 刚回过话的冷却期：默认不接，但骂到它头上、又叫了它，规则直接打破
+        # 3) 刚回过话的冷却期：默认不接。叫名字直接放行；带脏话的也放行，
+        #    但只是「让判官看一眼」，由它结合上下文判断在骂谁，不直接接
         remain = self._suppressed_for(umo)
         if remain > 0:
             if not self._break_allowed(umo, message, api_cfg, summon_hit):
@@ -687,9 +809,15 @@ class GroupChatContext:
                     f"group judge | 连发抑制(剩{remain:.0f}s) | {message[:30]}"
                 )
                 return False
-            logger.info(
-                f"group judge | 强触发打破冷却(剩{remain:.0f}s) | {message[:30]}"
-            )
+            if self._hard_break(umo, message, api_cfg, summon_hit):
+                logger.info(
+                    f"group judge | 点名打破冷却(剩{remain:.0f}s) | {message[:30]}"
+                )
+            else:
+                logger.info(
+                    f"group judge | 脏话待判(剩{remain:.0f}s)，交给判官看骂谁 "
+                    f"| {message[:30]}"
+                )
 
         # 4) 条数限制前处理：超了就不花 token（开关：budget_gate）
         if api_cfg.get("budget_gate", True):
@@ -725,7 +853,7 @@ class GroupChatContext:
             except re.error:
                 continue
         # 5) 话段复用：这一段已经判过/回过了，就不再送判官（省 token）。
-        #    强触发（骂它、叫它）在 _break_allowed 里已经放行，不会卡死。
+        #    叫它名字直接放行；带脏话的放行给判官，由它判断在骂谁。
         if self._burst_blocked(umo, message, api_cfg):
             return False
 
@@ -754,7 +882,13 @@ class GroupChatContext:
                 return True
             return False
 
-        verdict = await self._judge_api(umo, message, records, api_cfg)
+        verdict = await self._judge_api(
+            umo,
+            message,
+            records,
+            api_cfg,
+            insult=self._insult_hit(message, api_cfg),
+        )
         if verdict is None:
             # 失败/超限/熔断：概率兜底，不硬中断（也不标记话段，等下次重试）
             if random.random() < api_cfg["fallback_chance"]:
@@ -778,9 +912,22 @@ class GroupChatContext:
         return True
 
     async def _judge_api(
-        self, umo: str, message: str, records: list, api_cfg: dict
+        self,
+        umo: str,
+        message: str,
+        records: list,
+        api_cfg: dict,
+        insult: bool = False,
     ) -> bool | None:
         """Ask the third-party judge model with a minimal prompt.
+
+        Args:
+            umo: Unified message origin.
+            message: Incoming text.
+            records: Recent group records.
+            api_cfg: Third-party judge profile.
+            insult: The message contains a swear word; ask the judge to work out
+                who it is aimed at instead of guessing from rules.
 
         Returns:
             True/False for the verdict, None when the call failed, was cooling
@@ -831,6 +978,20 @@ class GroupChatContext:
             .replace("{last_bot}", last_bot)
             .replace("{message}", message)
         )
+        if insult:
+            # 规则只能看出「有脏话」，看不出骂的是谁；这一步交给能读上下文的判官
+            said = (self._last_bot.get(umo) or "")[:30]
+            if said:
+                prompt += (
+                    "\n\n注意：这句带脏话。先判断它在骂谁——"
+                    f"如果是在接你刚才说的「{said}」，或者用「你」指的是你，回 1；"
+                    "如果明显在骂群里另一个人、跟你无关，回 0。"
+                )
+            else:
+                prompt += (
+                    "\n\n注意：这句带脏话。只有明显在骂你（比如用「你」指向你）"
+                    "才回 1；在骂群里其他人、跟你无关回 0。"
+                )
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
@@ -946,17 +1107,33 @@ class GroupChatContext:
             self._judge_cache_map.pop(key, None)
 
     def note_bot_reply(self, umo: str, text: str) -> None:
-        """Remember the bot's latest line so the judge can read follow-ups."""
-        now = time.time()
+        """模型生成完了：记下这句话，并按「分段发送耗时」推算真正发完的时刻。
+
+        分段发送是 AstrBot 自带功能，每段之间都会 sleep，所以「生成完」不等于
+        「发完」。冷却必须从发完开始算，否则发送期间和刚发完的几秒会漏挡。
+
+        Args:
+            umo: Unified message origin.
+            text: Full completion text of this reply.
+        """
+        # 本地模式保持最初行为：这套状态一个都不碰
+        if not is_third_party_mode():
+            return
         text = (text or "").strip()
-        if text:
-            self._last_bot[umo] = text[:200]
-            self._last_bot_at[umo] = now
-        # 真正发完了：在途标记清掉，收敛成「刚回过话」的短冷却。
-        # 冷却只挡「紧接着的下一条」，不挡叫它名字/骂到它头上——那是 _break_allowed 的事。
+        if not text:
+            return
+        now = time.time()
+        est = _estimate_send_seconds(text)
+        self._last_bot[umo] = text[:200]
+        # 记发言区间（开始 ~ 预计发完），判断「骂的是不是它」要用
+        self._last_bot_span[umo] = (now, now + est)
         gap = load_judge_api_config()["reply_gap"]
-        self._inflight_until[umo] = 0.0
-        self._cool_until[umo] = now + max(0, gap)
+        # 发送期间算「在途」（召唤词也要让路），发完之后才开始 reply_gap 冷却
+        self._inflight_until[umo] = now + est
+        self._cool_until[umo] = now + est + max(0, gap)
+        logger.info(
+            f"group judge | 分段发送估算 {est:.1f}s，之后冷却 {max(0, gap)}s"
+        )
 
     def _inflight_for(self, umo: str) -> float:
         """Seconds until the in-flight reply slot frees up (strictly "sending now")."""
@@ -1007,7 +1184,7 @@ class GroupChatContext:
             True when this message should be skipped without calling the judge.
         """
         state = self._burst.get(umo)
-        if not state:
+        if not state or not api_cfg.get("burst_enable", True):
             return False
         now = time.time()
         if now >= float(state.get("until") or 0):
@@ -1017,9 +1194,14 @@ class GroupChatContext:
             # 中间冷场超过 burst_gap，算新的一段
             self._burst.pop(umo, None)
             return False
-        # 省 token 不能省到「骂它也不吭声」：强触发随时可以打破复用
+        # 省 token 不能省到「骂它也不吭声」：点名直接放行，脏话放行给判官
         if self._break_allowed(umo, message, api_cfg):
-            logger.info(f"group judge | 话段内强触发，打破复用 | {message[:30]}")
+            reason = (
+                "点名"
+                if self._hard_break(umo, message, api_cfg)
+                else "脏话待判"
+            )
+            logger.info(f"group judge | 话段内{reason}，打破复用 | {message[:30]}")
             self._burst.pop(umo, None)
             return False
         logger.info(
@@ -1045,19 +1227,44 @@ class GroupChatContext:
         return "，".join(reversed(parts))
 
     def _bot_spoke_last(self, umo: str) -> bool:
-        """这一条之前，最近开口的是不是它自己。"""
-        last_bot = self._last_bot_at.get(umo, 0.0)
-        if not last_bot:
+        """上一条群消息是不是接着它这次发言说的。
+
+        用「发言区间」判断，而不是「最后一次发言时间戳」：它一句话要分几段
+        发出去，中间隔好几秒，只记一个时间点会漏掉「发送期间插话」的情况。
+
+        Args:
+            umo: Unified message origin.
+
+        Returns:
+            True when the previous group message fell inside (or just after)
+            the bot's latest utterance window.
+        """
+        span = self._last_bot_span.get(umo)
+        if not span:
             return False
-        return last_bot > self._prev_arrival.get(umo, 0.0)
+        start, end = span
+        prev = self._prev_arrival.get(umo, 0.0)
+        return start - 1.5 <= prev <= end + 1.5
+
+    def _insult_hit(self, message: str, api_cfg: dict) -> bool:
+        """这句里有没有骂人的词（命中不代表骂的是它）。"""
+        return any(w and w in message for w in api_cfg["break_words"])
+
+    def _hard_break(
+        self, umo: str, message: str, api_cfg: dict, summon_hit: str = ""
+    ) -> bool:
+        """0 token 就能确定是冲着它来的：召唤词 / 叫它的名字。"""
+        if summon_hit:
+            return True
+        return any(n and n in message for n in api_cfg["bot_names"])
 
     def _break_allowed(
         self, umo: str, message: str, api_cfg: dict, summon_hit: str = ""
     ) -> bool:
-        """强触发：冷却期/话段复用期间，这句值不值得破例回一次。
+        """冷却期/话段复用期间，这句值不值得再让判官看一眼。
 
-        完全走规则，不花 token。「往上看是不是在说自己」用两条线索：
-        有没有叫它名字，以及上一条开口的是不是它。
+        注意返回值不等于「直接回」：叫名字是直接回，骂人的话只是**放行给判官**
+        去判断在骂谁——它能看到上下文和「你刚才说了什么」，规则看不到。
 
         Args:
             umo: Unified message origin.
@@ -1068,26 +1275,9 @@ class GroupChatContext:
         Returns:
             True when the message should bypass burst suppression.
         """
-        if summon_hit:
+        if self._hard_break(umo, message, api_cfg, summon_hit):
             return True
-        names = [n for n in api_cfg["bot_names"] if n]
-        if any(n in message for n in names):
-            return True
-        words = [w for w in api_cfg["break_words"] if w]
-        if not words:
-            return False
-        hit = next((w for w in words if w in message), "")
-        if not hit:
-            return False
-        # 骂人的话 + 上一条是它说的 → 认定在说它
-        if self._bot_spoke_last(umo):
-            return True
-        # 骂人的话 + 第二人称 → 大概率指着它，但也不排除指着别人
-        if any(p in message for p in ("你", "您", "尼", "泥")):
-            return time.time() - self._last_bot_at.get(umo, 0.0) <= api_cfg[
-                "break_follow"
-            ]
-        return False
+        return self._insult_hit(message, api_cfg)
 
     def _too_similar(self, umo: str, message: str, api_cfg: dict) -> bool:
         """Whether this message is a near-repeat of the one that just got a reply.
@@ -1261,7 +1451,7 @@ class GroupChatContext:
                 self._burst,
                 self._last_arrival,
                 self._prev_arrival,
-                self._last_bot_at,
+                self._last_bot_span,
                 self._inflight_until,
                 self._cool_until,
                 self._last_trigger,

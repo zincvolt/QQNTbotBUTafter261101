@@ -1502,6 +1502,7 @@ def get_judge_api() -> JSONResponse:
     data.setdefault("burst_gap", 15)
     data.setdefault("burst_settle", 3.5)
     data.setdefault("burst_reuse", 45)
+    data.setdefault("burst_enable", True)
     data.setdefault("summon_gap", 4)
     data.setdefault("break_follow", 30)
     data.setdefault("bot_names", [])
@@ -1537,6 +1538,7 @@ async def save_judge_api(request: Request) -> JSONResponse:
         "burst_gap",
         "burst_settle",
         "burst_reuse",
+        "burst_enable",
         "summon_gap",
         "break_follow",
         "bot_names",
