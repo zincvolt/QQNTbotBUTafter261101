@@ -1,0 +1,30 @@
+{
+  "enable": true,
+  "api_base": "https://api.deepseek.com/v1",
+  "api_key": "",
+  "model": "",
+  "prompt": "你是群聊接话判定器。判断机器人要不要接最后一条消息。\n规则：\n- @ 机器人、叫它名字、纠错或追问它刚才说的话 → 1\n- 向它提问、倾诉、求助 → 1\n- 别人互相聊天、陈述自己的安排、跟它无关 → 0\n- 骂人、复读、纯表情 → 0\n最多参考最近 3 条消息。\n\n最近聊天：\n{recent}\n\n你刚才说：{last_bot}\n\n新消息：{message}\n\n只输出 1 或 0。",
+  "recent_max": 3,
+  "recent_chars": 60,
+  "include_last_bot": true,
+  "max_tokens": 2,
+  "temperature": 0,
+  "budget_gate": true,
+  "use_reply_chance": false,
+  "reply_chance": 1.0,
+  "fallback_chance": 0.3,
+  "cache_seconds": 30,
+  "daily_limit": 50000,
+  "used": {
+    "date": "",
+    "tokens": 0
+  },
+  "ignore": [],
+  "force_reply": [],
+  "force_patterns": [],
+  "followup_patterns": [
+    "(?:你|阿灰|灰灰).{0,8}(?:不是|怎么|为什么|为啥|刚才|刚刚|说的|叫|汪|喵)",
+    "你不是.{0,6}吗",
+    "(?:你|阿灰|灰灰)是(?:猫|狗|狼|人|机器人)吗"
+  ]
+}

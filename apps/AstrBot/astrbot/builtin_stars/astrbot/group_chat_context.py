@@ -67,6 +67,26 @@ DEFAULT_JUDGE_PROMPT = (
 
 _judge_cache: dict = {"mtime": 0.0, "data": None}
 
+# 第三方模式专用的判官配置（独立密钥/规则/额度，不写在 judge.json 里）
+JUDGE_API_CONFIG_PATH = Path(r"D:\QQNTBOT\data\judge_api.json")
+DEFAULT_JUDGE_API_PROMPT = (
+    "你是群聊接话判定器。判断机器人要不要接最后一条消息。\n"
+    "规则：\n"
+    "- @ 机器人、叫它名字、纠错或追问它刚才说的话 → 1\n"
+    "- 向它提问、倾诉、求助 → 1\n"
+    "- 别人互相聊天、陈述自己的安排、跟它无关 → 0\n"
+    "- 骂人、复读、纯表情 → 0\n"
+    "最近聊天：\n{recent}\n\n"
+    "你刚才说：{last_bot}\n\n"
+    "新消息：{message}\n\n"
+    "只输出 1 或 0。"
+)
+_judge_api_cache: dict = {"mtime": 0.0, "data": None}
+
+# 主模型 provider 的唯一真相（和 /切换 共用同一个配置）
+PROVIDER_CONFIG_PATH = Path(r"D:\QQNTBOT\apps\AstrBot\data\cmd_config.json")
+_provider_cache: dict = {"mtime": 0.0, "id": ""}
+
 # 按群的自动接话开关，缺省等于全开
 MAIN_JUDGE_URL = "http://127.0.0.1:8080/v1/chat/completions"
 MAIN_JUDGE_KEY = "sk-llm-7d41c9e2"
@@ -220,6 +240,147 @@ def load_judge_config() -> dict:
     return data
 
 
+def _as_int(value, default: int, low: int, high: int) -> int:
+    """Clamp an arbitrary config value into an int range."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, number))
+
+
+def _as_float(value, default: float, low: float, high: float) -> float:
+    """Clamp an arbitrary config value into a float range."""
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return default
+    return max(low, min(high, number))
+
+
+def load_judge_api_config() -> dict:
+    """Load the third-party judge profile (``data/judge_api.json``).
+
+    Kept separate from ``judge.json`` so the dashboard's local-judge editor
+    can never wipe the API settings. Cached by file mtime.
+
+    Returns:
+        A normalized dict with backend, prompt, rules and budget fields.
+    """
+    global _judge_api_cache
+    defaults = {
+        "enable": True,
+        "api_base": "https://api.deepseek.com/v1",
+        "api_key": "",
+        "model": "",
+        "prompt": DEFAULT_JUDGE_API_PROMPT,
+        "recent_max": 3,
+        "recent_chars": 60,
+        "include_last_bot": True,
+        "max_tokens": 2,
+        "temperature": 0.0,
+        "budget_gate": True,
+        "use_reply_chance": False,
+        "reply_chance": 1.0,
+        "fallback_chance": 0.3,
+        "cache_seconds": 30,
+        "daily_limit": 50000,
+        "used": {"date": "", "tokens": 0},
+        "ignore": [],
+        "force_reply": [],
+        "force_patterns": [],
+        "followup_patterns": [],
+        "summon": [],
+    }
+    try:
+        stat = JUDGE_API_CONFIG_PATH.stat()
+    except OSError:
+        return defaults
+
+    if _judge_api_cache["data"] is not None and stat.st_mtime == _judge_api_cache["mtime"]:
+        return _judge_api_cache["data"]
+
+    try:
+        raw = json.loads(JUDGE_API_CONFIG_PATH.read_text(encoding="utf-8-sig"))
+    except (json.JSONDecodeError, OSError):
+        raw = {}
+
+    prompt = str(raw.get("prompt") or DEFAULT_JUDGE_API_PROMPT)
+    if "{message}" not in prompt:
+        prompt = DEFAULT_JUDGE_API_PROMPT
+
+    def _words(key: str) -> list[str]:
+        return [str(x).strip() for x in raw.get(key, []) if str(x).strip()]
+
+    used = raw.get("used") if isinstance(raw.get("used"), dict) else {}
+    data = {
+        "enable": bool(raw.get("enable", True)),
+        "api_base": str(raw.get("api_base") or defaults["api_base"]).rstrip("/"),
+        "api_key": str(raw.get("api_key") or "").strip(),
+        "model": str(raw.get("model") or "").strip(),
+        "prompt": prompt,
+        "recent_max": _as_int(raw.get("recent_max"), 3, 1, 8),
+        "recent_chars": _as_int(raw.get("recent_chars"), 60, 20, 200),
+        "include_last_bot": bool(raw.get("include_last_bot", True)),
+        "max_tokens": _as_int(raw.get("max_tokens"), 2, 1, 8),
+        "temperature": _as_float(raw.get("temperature"), 0.0, 0.0, 1.5),
+        "budget_gate": bool(raw.get("budget_gate", True)),
+        "use_reply_chance": bool(raw.get("use_reply_chance", False)),
+        "reply_chance": _as_float(raw.get("reply_chance"), 1.0, 0.0, 1.0),
+        "fallback_chance": _as_float(raw.get("fallback_chance"), 0.3, 0.0, 1.0),
+        "cache_seconds": _as_int(raw.get("cache_seconds"), 30, 0, 3600),
+        "daily_limit": _as_int(raw.get("daily_limit"), 50000, 0, 10_000_000),
+        "used": {
+            "date": str(used.get("date") or ""),
+            "tokens": _as_int(used.get("tokens"), 0, 0, 10_000_000_000),
+        },
+        "ignore": _words("ignore"),
+        "force_reply": _words("force_reply"),
+        "force_patterns": _words("force_patterns"),
+        "followup_patterns": _words("followup_patterns"),
+        "summon": _words("summon"),
+    }
+    _judge_api_cache = {"mtime": stat.st_mtime, "data": data}
+    return data
+
+
+def current_provider_id() -> str:
+    """Read the active chat provider id from AstrBot's config.
+
+    Returns:
+        Provider id such as ``deepseek`` or ``local-llama``; empty on failure.
+    """
+    global _provider_cache
+    try:
+        stat = PROVIDER_CONFIG_PATH.stat()
+    except OSError:
+        return ""
+    if stat.st_mtime == _provider_cache["mtime"]:
+        return _provider_cache["id"]
+    try:
+        cfg = json.loads(PROVIDER_CONFIG_PATH.read_text(encoding="utf-8-sig"))
+        pid = str(
+            cfg.get("agent_runner", {})
+            .get("config", {})
+            .get("model", {})
+            .get("provider_id", "")
+        )
+    except (json.JSONDecodeError, OSError, AttributeError):
+        pid = ""
+    _provider_cache = {"mtime": stat.st_mtime, "id": pid}
+    return pid
+
+
+def is_third_party_mode() -> bool:
+    """Whether the chat model currently runs on a third-party provider."""
+    return "deepseek" in current_provider_id().lower()
+
+
+def _record_text(record) -> str:
+    """Strip the ``[nickname/time]: `` prefix from a stored group message."""
+    return re.sub(r"^\[[^\]]*\]:\s*", "", str(record)).strip()
+
+
 class GroupChatContext:
     def __init__(self, acm: AstrBotConfigManager, context: star.Context) -> None:
         self.acm = acm
@@ -229,6 +390,14 @@ class GroupChatContext:
         self._record_ids: dict[str, deque[str]] = defaultdict(deque)
         self._record_times: dict[str, deque[float]] = defaultdict(deque)
         self._reply_times: dict[str, deque[float]] = defaultdict(deque)
+        # 第三方判官运行时状态
+        self._last_bot: dict[str, str] = {}
+        self._judge_cache_map: dict[tuple[str, str], tuple[float, bool]] = {}
+        self._judge_fail = 0
+        self._judge_cooldown_until = 0.0
+        self._judge_usage = dict(load_judge_api_config()["used"])
+        self._judge_usage_dirty = False
+        self._judge_last_flush = 0.0
 
     def _get_lock(self, umo: str) -> asyncio.Lock:
         lock = self._locks.get(umo)
@@ -312,12 +481,21 @@ class GroupChatContext:
             return False
         # 喊名字 = 明确在叫它，直接接，不经过判官和概率闸
         judge_cfg = load_judge_config()
+        api_cfg = load_judge_api_config()
         text = event.message_str or ""
-        for word in judge_cfg.get("summon", []):
+        summon_words = list(judge_cfg.get("summon", []))
+        for word in api_cfg.get("summon", []):
+            if word not in summon_words:
+                summon_words.append(word)
+        for word in summon_words:
             if word and word in text:
                 self._note_reply(event.unified_msg_origin)
                 logger.info(f"group judge | 召唤词({word})直通 | {text[:30]}")
                 return True
+
+        # 第三方模式走独立的一套：规则前置 + 短提示词 + 独立密钥/额度
+        if is_third_party_mode():
+            return await self._need_active_reply_api(event, cfg, api_cfg)
 
         match cfg["ar_method"]:
             case "possibility_reply":
@@ -338,6 +516,255 @@ class GroupChatContext:
                 return False
         return False
 
+    async def _need_active_reply_api(
+        self, event: AstrMessageEvent, cfg: dict, api_cfg: dict
+    ) -> bool:
+        """第三方模式的接话判定：规则前置，模型只看裁剪后的短上下文。
+
+        Args:
+            event: Incoming group message.
+            cfg: Active-reply config (probability fallback only).
+            api_cfg: Third-party judge profile from ``judge_api.json``.
+
+        Returns:
+            True when the bot should chime in.
+        """
+        umo = event.unified_msg_origin
+        message = (event.message_str or "").strip()
+        if not message:
+            return False
+
+        # 条数限制前处理：超了就不花 token（开关：budget_gate）
+        if api_cfg.get("budget_gate", True):
+            over, used = self._over_budget(umo)
+            if over:
+                logger.info(f"group judge | 条数限制({used})前置拦截 | {message[:30]}")
+                return False
+
+        for kw in api_cfg["ignore"]:
+            if kw and kw in message:
+                logger.info(f"group judge | API 免打扰({kw}) | {message[:40]}")
+                return False
+        for kw in api_cfg["force_reply"]:
+            if kw and kw in message:
+                logger.info(f"group judge | API 必答({kw}) | {message[:40]}")
+                return True
+        for pattern in api_cfg["force_patterns"]:
+            try:
+                if re.search(pattern, message):
+                    logger.info(f"group judge | API 必答正则({pattern}) | {message[:40]}")
+                    return True
+            except re.error:
+                continue
+        # 指向 bot 的追问/纠错：0 token 直通（“你不是猫吗怎么汪汪叫”）
+        for pattern in api_cfg["followup_patterns"]:
+            try:
+                if re.search(pattern, message):
+                    logger.info(f"group judge | 追问直通({pattern}) | {message[:40]}")
+                    return True
+            except re.error:
+                continue
+        if len(message) <= 3:
+            logger.info(f"group judge | 过短不接 | {message[:20]}")
+            return False
+
+        records = list(self.raw_records.get(umo, []))
+        if records and _record_text(records[-1]) == message:
+            logger.info(f"group judge | 复读不接 | {message[:20]}")
+            return False
+
+        # 关掉第三方判官：不碰 8082，直接规则 + 概率兜底
+        if not api_cfg["enable"]:
+            logger.info("group judge | 第三方判官已关，走规则+概率")
+            return random.random() < api_cfg["fallback_chance"]
+
+        verdict = await self._judge_api(umo, message, records, api_cfg)
+        if verdict is None:
+            # 失败/超限/熔断：概率兜底，不硬中断
+            return random.random() < api_cfg["fallback_chance"]
+        if not verdict:
+            return False
+        if api_cfg["use_reply_chance"] and random.random() >= api_cfg["reply_chance"]:
+            logger.info(
+                f"group judge | API 概率闸拦截 "
+                f"(chance={api_cfg['reply_chance']:.2f}) | {message[:30]}"
+            )
+            return False
+        return True
+
+    async def _judge_api(
+        self, umo: str, message: str, records: list, api_cfg: dict
+    ) -> bool | None:
+        """Ask the third-party judge model with a minimal prompt.
+
+        Returns:
+            True/False for the verdict, None when the call failed, was cooling
+            down, or hit the daily token cap (caller falls back to probability).
+        """
+        now = time.time()
+        cache_key = (umo, message)
+        cached = self._judge_cache_map.get(cache_key)
+        if cached and now - cached[0] <= api_cfg["cache_seconds"]:
+            logger.info(f"group judge | API 缓存命中 | {message[:30]}")
+            return cached[1]
+        if now < self._judge_cooldown_until:
+            return None
+
+        today = datetime.datetime.now().strftime("%Y%m%d")
+        used = dict(self._judge_usage)
+        if used.get("date") != today:
+            used = {"date": today, "tokens": 0}
+            self._judge_usage = used
+        limit = api_cfg["daily_limit"]
+        if limit and int(used.get("tokens") or 0) >= limit:
+            logger.warning(
+                f"group judge | API 判官日限额已满({used['tokens']})，走概率兜底"
+            )
+            return None
+
+        base, api_key, model = self._judge_api_credentials(api_cfg)
+        if not api_key:
+            logger.warning("group judge | 没有可用的 API 密钥，走概率兜底")
+            return None
+
+        recent_lines = []
+        for item in records[-api_cfg["recent_max"]:]:
+            text = _record_text(item)
+            if not text:
+                continue
+            if len(text) > api_cfg["recent_chars"]:
+                text = text[: api_cfg["recent_chars"]] + "…"
+            recent_lines.append(text)
+        recent_text = "\n".join(recent_lines) or "(暂无更早消息)"
+        last_bot = "(还没说过话)"
+        if api_cfg["include_last_bot"]:
+            last_bot = (self._last_bot.get(umo) or "")[:80] or "(还没说过话)"
+
+        prompt = (
+            api_cfg["prompt"]
+            .replace("{recent}", recent_text)
+            .replace("{last_bot}", last_bot)
+            .replace("{message}", message)
+        )
+        payload = {
+            "model": model,
+            "messages": [{"role": "user", "content": prompt}],
+            "max_tokens": api_cfg["max_tokens"],
+            "temperature": api_cfg["temperature"],
+            "thinking": {"type": "disabled"},
+        }
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                resp = await client.post(
+                    f"{base}/chat/completions",
+                    headers={"Authorization": f"Bearer {api_key}"},
+                    json=payload,
+                )
+                resp.raise_for_status()
+                data = resp.json()
+            usage = data.get("usage") or {}
+            self._judge_usage_add(int(usage.get("total_tokens") or 0))
+            content = (data["choices"][0]["message"].get("content") or "").strip()
+            verdict = content.startswith("1")
+            self._judge_fail = 0
+            if api_cfg["cache_seconds"] > 0:
+                self._judge_cache_map[cache_key] = (now, verdict)
+                self._trim_judge_cache()
+            logger.info(
+                f"group judge | API verdict={content[:2] or '?'} "
+                f"tokens={usage.get('total_tokens', 0)} | {message[:30]}"
+            )
+            return verdict
+        except Exception as exc:  # noqa: BLE001 - 失败就概率兜底
+            self._judge_fail += 1
+            if self._judge_fail >= 3:
+                self._judge_cooldown_until = now + 300
+                self._judge_fail = 0
+                logger.warning("group judge | API 连续失败，暂停判官 5 分钟")
+            logger.warning(f"group judge | API 判官失败，走概率兜底: {exc}")
+            return None
+
+    def _judge_api_credentials(self, api_cfg: dict) -> tuple[str, str, str]:
+        """Resolve base/key/model, falling back to the active DeepSeek provider.
+
+        Returns:
+            (api_base, api_key, model) tuple; api_key is empty when unresolved.
+        """
+        base = str(api_cfg["api_base"] or "").rstrip("/")
+        api_key = str(api_cfg["api_key"] or "").strip()
+        model = str(api_cfg["model"] or "").strip()
+        if base and api_key and model:
+            return base, api_key, model
+        try:
+            cfg = json.loads(PROVIDER_CONFIG_PATH.read_text(encoding="utf-8-sig"))
+        except (json.JSONDecodeError, OSError):
+            return base, api_key, model
+        sources = {
+            str(s.get("id")): s
+            for s in cfg.get("provider_sources", [])
+            if isinstance(s, dict)
+        }
+        providers = {
+            str(p.get("id")): p for p in cfg.get("provider", []) if isinstance(p, dict)
+        }
+        provider = providers.get("deepseek") or {}
+        source = sources.get(str(provider.get("provider_source_id") or "")) or sources.get(
+            "deepseek_source"
+        ) or {}
+        if not api_key:
+            keys = source.get("key") if isinstance(source.get("key"), list) else []
+            api_key = str(source.get("api_key") or (keys[0] if keys else "")).strip()
+        if not model:
+            model = str(provider.get("model") or "deepseek-flash").strip()
+        if not base:
+            base = str(source.get("api_base") or "https://api.deepseek.com/v1").rstrip("/")
+        return base, api_key, model
+
+    def _judge_usage_add(self, tokens: int) -> None:
+        """Accumulate judge tokens into its own daily counter."""
+        if tokens <= 0:
+            return
+        today = datetime.datetime.now().strftime("%Y%m%d")
+        used = dict(self._judge_usage)
+        if used.get("date") != today:
+            used = {"date": today, "tokens": 0}
+        used["tokens"] = int(used.get("tokens") or 0) + tokens
+        self._judge_usage = used
+        self._judge_usage_dirty = True
+        if time.time() - self._judge_last_flush > 60:
+            self._flush_judge_usage()
+
+    def _flush_judge_usage(self) -> None:
+        """Write the judge counter back without clobbering other fields."""
+        if not self._judge_usage_dirty:
+            return
+        self._judge_usage_dirty = False
+        self._judge_last_flush = time.time()
+        try:
+            raw = json.loads(JUDGE_API_CONFIG_PATH.read_text(encoding="utf-8-sig"))
+            if not isinstance(raw, dict):
+                raw = {}
+            raw["used"] = dict(self._judge_usage)
+            JUDGE_API_CONFIG_PATH.write_text(
+                json.dumps(raw, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            _judge_api_cache["mtime"] = JUDGE_API_CONFIG_PATH.stat().st_mtime
+        except (json.JSONDecodeError, OSError) as exc:
+            logger.warning(f"group judge | 写用量失败: {exc}")
+
+    def _trim_judge_cache(self) -> None:
+        """Keep the verdict cache bounded."""
+        if len(self._judge_cache_map) <= 200:
+            return
+        oldest = sorted(self._judge_cache_map.items(), key=lambda item: item[1][0])[:100]
+        for key, _ in oldest:
+            self._judge_cache_map.pop(key, None)
+
+    def note_bot_reply(self, umo: str, text: str) -> None:
+        """Remember the bot's latest line so the judge can read follow-ups."""
+        text = (text or "").strip()
+        if text:
+            self._last_bot[umo] = text[:200]
 
     def _note_reply(self, umo: str) -> None:
         """记一次回复（@、召唤词、随机插话都算）。"""

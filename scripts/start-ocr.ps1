@@ -1,6 +1,8 @@
 # Start the OCR model as a dedicated long-running server (ASCII only)
 # Runs on 127.0.0.1:8083 so the chat router never evicts the 9B to read an image.
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '_common.ps1')
+Repair-Env
 
 $exe    = 'D:\LLM\llama.cpp\b12274\llama-server.exe'
 $model  = 'D:\LLM\models\PaddleOCR-VL-1.6.gguf'

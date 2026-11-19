@@ -1,6 +1,8 @@
 # Start the tiny judge model (ASCII only)
 # Qwen3-1.7B on CPU: ~0.4s per verdict, ~1.8GB RSS, never touches the 9B slot.
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot '_common.ps1')
+Repair-Env
 
 $exe   = 'D:\LLM\llama.cpp\b12274\llama-server.exe'
 $model = 'D:\LLM\models\Qwen3-1.7B-Q8_0.gguf'

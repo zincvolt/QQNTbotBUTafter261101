@@ -303,8 +303,71 @@
         </div>
       </div>
       <div style="margin-top:10px">
+        <label style="display:inline-flex;align-items:center;gap:8px;margin-right:12px;color:var(--text)">
+          <input type="checkbox" id="testUseApi"> 用第三方判官试
+        </label>
         <button data-cap="judge" onclick="testJudge()">试一下</button>
         <span class="hint" id="testResult"></span>
+      </div>
+    </div>
+
+    <div style="margin-top:18px; border-top:1px solid var(--line); padding-top:14px">
+      <h3 style="margin:0 0 6px">第三方模式判官（主模型是 DeepSeek 时生效）</h3>
+      <div class="hint">不走 8082，直接调 API。规则先跑，只有模糊消息才花 token；本地模式仍用上面的配置。</div>
+
+      <div class="two" style="margin-top:12px">
+        <div>
+          <label>API Base</label>
+          <input id="jaBase" type="text" placeholder="https://api.deepseek.com/v1">
+        </div>
+        <div>
+          <label>模型名</label>
+          <input id="jaModel" type="text" placeholder="留空则跟随主模型">
+        </div>
+      </div>
+
+      <label style="margin-top:12px">独立 API 密钥（留空表示沿用主模型密钥）</label>
+      <input id="jaKey" type="password" placeholder="sk-...（保存后不回显）">
+      <div class="hint" id="jaKeyState"></div>
+
+      <div class="two" style="margin-top:12px">
+        <div>
+          <label>最近上下文条数</label>
+          <input id="jaRecent" type="number" min="1" max="8" step="1">
+        </div>
+        <div>
+          <label>判官日限额（tokens，0=不限）</label>
+          <input id="jaLimit" type="number" min="0" step="1000">
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <label>兜底概率（判官关闭/失败/超限时按这个概率回）</label>
+        <input id="jaFallback" type="number" min="0" max="1" step="0.05" placeholder="0.3">
+      </div>
+
+      <div style="display:grid;gap:10px;margin-top:12px">
+        <label style="display:flex;align-items:center;gap:10px;color:var(--text)">
+          <input type="checkbox" id="jaEnable">
+          启用第三方判官（关闭后第三方模式退回规则 + 概率）
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;color:var(--text)">
+          <input type="checkbox" id="jaBudget">
+          回复条数限制前处理（超预算就不调模型）
+        </label>
+        <label style="display:flex;align-items:center;gap:10px;color:var(--text)">
+          <input type="checkbox" id="jaChance">
+          保留概率闸（默认关：判官说接就接）
+        </label>
+      </div>
+
+      <label style="margin-top:12px">判定提示词（必须保留 {message}，可用 {recent} 和 {last_bot}）</label>
+      <textarea id="jaPrompt" rows="8" placeholder="加载中…"></textarea>
+
+      <div style="margin-top:12px">
+        <button class="primary" onclick="saveJudgeApi()">保存第三方判官</button>
+        <span class="hint" id="jaMsg"></span>
+        <span class="hint" id="jaUsage"></span>
       </div>
     </div>
   </div>
@@ -758,6 +821,7 @@ async function loadJudge() {
   document.getElementById('judgePrompt').value = j.prompt || '';
   document.getElementById('judgeForce').value = (j.force_reply || []).join('\n');
   document.getElementById('judgeIgnore').value = (j.ignore || []).join('\n');
+  loadJudgeApi();
 }
 function lines(id) {
   return document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
@@ -772,12 +836,60 @@ async function saveJudge() {
   if (!r.ok) { fail(r, 'judgePrompt', 'judgeMsg'); return; }
   say('judgeMsg', r.data.msg || (r.data.ok ? '已保存' : '失败'));
 }
+async function loadJudgeApi() {
+  const r = await api('/api/judge/api');
+  if (!r.ok) { fail(r, 'jaBase', 'jaMsg'); return; }
+  const j = r.data;
+  document.getElementById('jaBase').value = j.api_base || '';
+  document.getElementById('jaModel').value = j.model || '';
+  document.getElementById('jaRecent').value = j.recent_max ?? 3;
+  document.getElementById('jaLimit').value = j.daily_limit ?? 0;
+  document.getElementById('jaFallback').value = j.fallback_chance ?? 0.3;
+  document.getElementById('jaEnable').checked = j.enable !== false;
+  document.getElementById('jaBudget').checked = j.budget_gate !== false;
+  document.getElementById('jaChance').checked = !!j.use_reply_chance;
+  document.getElementById('jaPrompt').value = j.prompt || '';
+  document.getElementById('jaKeyState').textContent = j.api_key_set
+    ? '已配置独立密钥（输入新值可替换）'
+    : '未配置，当前沿用主模型密钥';
+  const used = j.used || {};
+  document.getElementById('jaUsage').textContent = used.date
+    ? ` · 今日判官 ${used.tokens || 0} tokens`
+    : '';
+}
+
+async function saveJudgeApi() {
+  say('jaMsg', '保存中…');
+  const body = {
+    api_base: document.getElementById('jaBase').value.trim(),
+    model: document.getElementById('jaModel').value.trim(),
+    recent_max: Number(document.getElementById('jaRecent').value) || 3,
+    daily_limit: Number(document.getElementById('jaLimit').value) || 0,
+    fallback_chance: Number(document.getElementById('jaFallback').value) || 0,
+    enable: document.getElementById('jaEnable').checked,
+    budget_gate: document.getElementById('jaBudget').checked,
+    use_reply_chance: document.getElementById('jaChance').checked,
+    prompt: document.getElementById('jaPrompt').value
+  };
+  const key = document.getElementById('jaKey').value.trim();
+  if (key) body.api_key = key;
+  const r = await post('/api/judge/api', body);
+  if (!r.ok) { fail(r, 'jaBase', 'jaMsg'); return; }
+  say('jaMsg', r.data.msg || (r.data.ok ? '已保存' : '失败'));
+  if (r.data.ok) {
+    document.getElementById('jaKey').value = '';
+    loadJudgeApi();
+  }
+}
+
 async function testJudge() {
-  if (!capOk('judge')) { say('testResult', '判官服务未启动，无法试判'); return; }
+  const useApi = !!document.getElementById('testUseApi')?.checked;
+  if (!useApi && !capOk('judge')) { say('testResult', '判官服务未启动，无法试判'); return; }
   say('testResult', '判定中…');
   const r = await post('/api/judge/test', {
     message: document.getElementById('testMsg').value,
-    recent: document.getElementById('testRecent').value
+    recent: document.getElementById('testRecent').value,
+    backend: useApi ? 'api' : 'local'
   });
   if (!r.ok) { say('testResult', r.error); return; }
   if (r.data.ok === false) { say('testResult', r.data.msg); return; }

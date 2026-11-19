@@ -291,7 +291,8 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 | `data\reply.json` | 回复预算 / 召唤词开关 / 上下文时间窗 / 回复与表情概率 / 文本替换正则 |
 | `data\memory.db` | 长期记忆 |
 | `data\caption_cache.db` | 图片释义缓存 |
-| `start-all.ps1` / `stop-all.ps1` | 一键启停（会弹控制台和二维码） |
+| `start-all.ps1` / `stop-all.ps1` | 一键启停（按模式自动跳过本地模型，分离启动，参数见 §12） |
+| `scripts\_common.ps1` | 启停脚本公共函数：端口探测/停止、分离启动、env 修复 |
 | `scripts\restart-astrbot.ps1` | 只重启 AstrBot（不动 QQ，不用扫码） |
 | `apps\AstrBot\data\cmd_config.json` | AstrBot 主配置（provider/白名单/压缩等） |
 | `apps\AstrBot\data\plugins\astrbot_plugin_peer\` | 人设、闸门、水群、发图、文本处理 |
@@ -303,12 +304,18 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 ## 12. 运维
 
 **启动**：双击桌面「启动QQ机器人」（= `start-all.ps1`）
-自动完成：版本守卫 → 路由 → 判官 → OCR → AstrBot → QQ/NapCat → 控制台，
+自动完成：版本守卫 → 读模式 → （本地模型）→ 判官/嵌入/释义缓存 → AstrBot → QQ/NapCat → 控制台，
 需要扫码时会自动弹出二维码窗口。
 
-**停**：`stop-all.ps1`
+读 `agent_runner.config.model.provider_id` 决定是否起 8080/8083/8085：**第三方模式跳过，省约 14 GB**。
+服务默认用 WMI 分离启动（父进程 `WmiPrvSE.exe`），关掉 PowerShell 窗口不会带走机器人。
 
-**只重启 AstrBot**：`scripts\restart-astrbot.ps1`（10 秒，QQ 不断线）
+参数：`-ThirdParty` 强制跳过本地模型 / `-Local` 强制启动 / `-NoBrowser` 不开页面 / `-NoDetach` 挂在本窗口。
+
+**停**：`stop-all.ps1`（按端口杀进程），`-KeepQQ` 保留 QQ、`-KeepModels` 保留本地模型。
+返回码 0 = 全部按预期停止；1 = 有端口没释放（权限不够，或被别的东西又拉起来了）。
+
+**只重启 AstrBot**：`scripts\restart-astrbot.ps1`（10 秒，QQ 不断线；按 6185 端口定位进程）
 
 **日志**：
 - AstrBot：`apps\AstrBot\data\logs\astrbot.log`
@@ -338,8 +345,8 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 |---|---|
 | `core\pipeline\whitelist_check\stage.py` | 未授权私聊自动回一句 |
 | `core\pipeline\respond\stage.py` | `human` 分段间隔（0.45s + 字数/7） |
-| `builtin_stars\astrbot\group_chat_context.py` | 判官 `method=judge` + 按群自动接话开关 |
-| `builtin_stars\astrbot\main.py` | 主动接话缺会话时自动创建 |
+| `builtin_stars\astrbot\group_chat_context.py` | 判官 `method=judge` + 按群自动接话开关；2026-11-19 加本地/第三方双后端、追问直通、条数前处理 |
+| `builtin_stars\astrbot\main.py` | 主动接话缺会话时自动创建；`on_llm_response` 记录 bot 最近一句给第三方判官 |
 | `builtin_stars\astrbot\main.py` | `GeneratorExit` 不算错误（stop 事件时不再刷红字） |
 | `core\updater.py` | 禁止自动升级（`LOCAL_UPDATES_DISABLED`），保护上面 5 处补丁 |
 

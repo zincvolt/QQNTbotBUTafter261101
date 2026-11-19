@@ -53,7 +53,7 @@ dashboard/             本机控制台（FastAPI）
 caption_proxy/         图片描述缓存代理
 data/                  配置模板（*.json，敏感值已脱敏为 CHANGE_ME）
   cmd_config.json      主配置（密码/api_key 需自行填写）
-  persona.json / judge.json / reply.json / ...
+  persona.json / judge.json / judge_api.json / reply.json / ...
 apps/AstrBot/astrbot/  AstrBot 核心源码（含本项目 6 处补丁，见 PROJECT.md §14）
 start-all.ps1          一键启动（完整环境，需配合本地依赖）
 stop-all.ps1           一键停止
@@ -95,6 +95,7 @@ stop-all.ps1           一键停止
 2. 先读 [docs/HANDOFF.md](docs/HANDOFF.md)——5 分钟建立全局认知
 3. 按主题查 [docs/](docs/) 下其他文档
 4. 改完代码跑 `scripts/verify.ps1` 验证（尤其 AstrBot 升级后查补丁是否还在）
+5. **判官有两套互不干扰的配置**：本地模式用 `data/judge.json` + 8082；第三方模式用 `data/judge_api.json` + API，按主模型 provider 自动切换，细节见 [docs/THIRD-PARTY-API.md](docs/THIRD-PARTY-API.md) §14
 
 ## 部署提示
 

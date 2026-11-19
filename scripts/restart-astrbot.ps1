@@ -1,25 +1,45 @@
-# Restart only the AstrBot main process (keeps QQ, judge and dashboard alive)
+# Restart only the AstrBot main process (keeps QQ, judge and dashboard alive).
+# ~10 s, QQ never disconnects.
+#
+#   powershell -ExecutionPolicy Bypass -File scripts\restart-astrbot.ps1
+#   ... -NoDetach    keep AstrBot inside this shell (default is detached)
+#
+# The process is located by the port it listens on (6185), not by its command
+# line: an AstrBot started through uv only shows "python.exe main.py", so the old
+# regex match missed it and the restart silently did nothing.
+param([switch]$NoDetach)
+
 $ErrorActionPreference = 'Continue'
+. (Join-Path $PSScriptRoot '_common.ps1')
+Repair-Env
+$global:BotDetach = -not $NoDetach
 
-Get-CimInstance Win32_Process -Filter "Name='python.exe'" |
-    Where-Object { $_.CommandLine -and $_.CommandLine -match 'AstrBot' -and $_.CommandLine -match 'main\.py' } |
-    ForEach-Object {
-        Write-Host "  stopping AstrBot pid $($_.ProcessId)"
-        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
-    }
-
-Start-Sleep -Seconds 2
-
-Start-Process -WindowStyle Hidden `
-    -WorkingDirectory 'D:\QQNTBOT\apps\AstrBot' `
-    -FilePath 'D:\QQNTBOT\apps\AstrBot\.venv\Scripts\python.exe' `
-    -ArgumentList 'main.py'
-
-for ($i = 0; $i -lt 40; $i++) {
-    Start-Sleep -Seconds 1
-    if (Get-NetTCPConnection -State Listen -LocalPort 6185 -ErrorAction SilentlyContinue) {
-        Write-Host 'AstrBot restarted'
-        exit 0
-    }
+if (Test-Port 6185) {
+    Stop-Port 6185 'astrbot' | Out-Null
+} else {
+    Write-Host 'AstrBot was not running, starting it'
 }
-Write-Host 'WARN: AstrBot did not come back'
+
+Start-Sleep -Seconds 1
+
+if ($global:BotDetach) {
+    Start-Detached -FilePath $BotPython -ArgumentList @('main.py') `
+        -WorkingDirectory 'D:\QQNTBOT\apps\AstrBot' | Out-Null
+} else {
+    Start-Hidden -FilePath $BotPython -ArgumentList @('main.py') `
+        -WorkingDirectory 'D:\QQNTBOT\apps\AstrBot' | Out-Null
+}
+
+if (Wait-Port 6185 90) {
+    Write-Host 'AstrBot restarted on 6185'
+    exit 0
+}
+
+Write-Host 'WARN: AstrBot did not come back, last log lines:' -ForegroundColor Yellow
+$log = Get-ChildItem 'D:\QQNTBOT\apps\AstrBot\data\logs' -Filter '*.log' -ErrorAction SilentlyContinue |
+    Sort-Object LastWriteTime -Descending | Select-Object -First 1
+if ($log) {
+    Write-Host ("  ({0})" -f $log.Name)
+    Get-Content $log.FullName -Tail 20
+}
+exit 1

@@ -47,6 +47,7 @@ NAPCAT_LOG_DIR = ROOT / "apps" / "NapCat" / "logs"
 BOT_LOG_DIR = ROOT / "apps" / "AstrBot" / "data" / "logs"
 PERSONA_FILE = ROOT / "data" / "persona.json"
 JUDGE_FILE = ROOT / "data" / "judge.json"
+JUDGE_API_FILE = ROOT / "data" / "judge_api.json"
 WATER_FILE = ROOT / "data" / "water.json"
 AUTOREPLY_FILE = ROOT / "data" / "autoreply.json"
 REPLY_FILE = ROOT / "data" / "reply.json"
@@ -1436,17 +1437,104 @@ async def save_judge(request: Request) -> JSONResponse:
     prompt = str(body.get("prompt", "")).strip()
     if "{message}" not in prompt:
         return JSONResponse({"ok": False, "msg": "提示词里必须保留占位符 {message}"})
-    write_json(
-        JUDGE_FILE,
+    # 合并写入：force_patterns / summon 等字段不能被面板保存冲掉
+    data = read_json(JUDGE_FILE, {})
+    data.update(
         {
             "prompt": prompt,
             "ignore": [str(x).strip() for x in body.get("ignore", []) if str(x).strip()],
             "force_reply": [
                 str(x).strip() for x in body.get("force_reply", []) if str(x).strip()
             ],
-        },
+        }
     )
+    write_json(JUDGE_FILE, data)
     return JSONResponse({"ok": True, "msg": "已保存，下一条群消息就生效（无需重启）"})
+
+
+def _judge_api_credentials(cfg: dict) -> tuple[str, str, str]:
+    """Resolve third-party judge credentials, falling back to the DeepSeek provider."""
+    base = str(cfg.get("api_base") or "https://api.deepseek.com/v1").rstrip("/")
+    key = str(cfg.get("api_key") or "").strip()
+    model = str(cfg.get("model") or "").strip()
+    if base and key and model:
+        return base, key, model
+    provider_cfg = read_json(CFG, {})
+    sources = {
+        str(s.get("id")): s
+        for s in provider_cfg.get("provider_sources", [])
+        if isinstance(s, dict)
+    }
+    providers = {
+        str(p.get("id")): p
+        for p in provider_cfg.get("provider", [])
+        if isinstance(p, dict)
+    }
+    provider = providers.get("deepseek") or {}
+    source = sources.get(str(provider.get("provider_source_id") or "")) or sources.get(
+        "deepseek_source"
+    ) or {}
+    if not key:
+        keys = source.get("key") if isinstance(source.get("key"), list) else []
+        key = str(source.get("api_key") or (keys[0] if keys else "")).strip()
+    if not model:
+        model = str(provider.get("model") or "deepseek-flash").strip()
+    return base, key, model
+
+
+@app.get("/api/judge/api")
+def get_judge_api() -> JSONResponse:
+    """Return the third-party judge profile with the key masked."""
+    data = read_json(JUDGE_API_FILE, {})
+    key = str(data.get("api_key") or "")
+    data["api_key"] = ""
+    data["api_key_set"] = bool(key)
+    data.setdefault("used", {"date": "", "tokens": 0})
+    data.setdefault("enable", True)
+    data.setdefault("budget_gate", True)
+    data.setdefault("use_reply_chance", False)
+    data.setdefault("daily_limit", 50000)
+    return JSONResponse(data)
+
+
+@app.post("/api/judge/api")
+async def save_judge_api(request: Request) -> JSONResponse:
+    """Merge-save the third-party judge profile (empty key keeps the old one)."""
+    body = await request.json()
+    data = read_json(JUDGE_API_FILE, {})
+    for key in (
+        "enable",
+        "api_base",
+        "model",
+        "prompt",
+        "recent_max",
+        "recent_chars",
+        "include_last_bot",
+        "max_tokens",
+        "temperature",
+        "budget_gate",
+        "use_reply_chance",
+        "reply_chance",
+        "fallback_chance",
+        "cache_seconds",
+        "daily_limit",
+        "ignore",
+        "force_reply",
+        "force_patterns",
+        "followup_patterns",
+        "summon",
+    ):
+        if key in body:
+            data[key] = body[key]
+    if body.get("api_key"):
+        data["api_key"] = str(body["api_key"]).strip()
+    if body.get("clear_api_key"):
+        data["api_key"] = ""
+    prompt = str(data.get("prompt") or "")
+    if "{message}" not in prompt:
+        return JSONResponse({"ok": False, "msg": "提示词里必须保留占位符 {message}"})
+    write_json(JUDGE_API_FILE, data)
+    return JSONResponse({"ok": True, "msg": "已保存，下一条群消息生效"})
 
 
 @app.post("/api/judge/test")
@@ -1455,6 +1543,77 @@ async def test_judge(request: Request) -> JSONResponse:
     body = await request.json()
     message = str(body.get("message", "")).strip() or "今天好累啊"
     recent = str(body.get("recent", "")).strip() or "(暂无更早消息)"
+    backend = str(body.get("backend") or "local").lower()
+
+    if backend == "api":
+        api_cfg = read_json(JUDGE_API_FILE, {})
+        for kw in api_cfg.get("ignore", []):
+            if kw and kw in message:
+                return JSONResponse(
+                    {"verdict": "0", "source": f"命中免打扰规则：{kw}", "ms": 0}
+                )
+        for kw in api_cfg.get("force_reply", []):
+            if kw and kw in message:
+                return JSONResponse(
+                    {"verdict": "1", "source": f"命中必答规则：{kw}", "ms": 0}
+                )
+        for pattern in api_cfg.get("force_patterns", []):
+            try:
+                if re.search(str(pattern), message):
+                    return JSONResponse(
+                        {"verdict": "1", "source": f"命中必答正则：{pattern}", "ms": 0}
+                    )
+            except re.error:
+                continue
+        for pattern in api_cfg.get("followup_patterns", []):
+            try:
+                if re.search(str(pattern), message):
+                    return JSONResponse(
+                        {"verdict": "1", "source": f"命中追问直通：{pattern}", "ms": 0}
+                    )
+            except re.error:
+                continue
+        if len(message) <= 3:
+            return JSONResponse({"verdict": "0", "source": "过短不接", "ms": 0})
+
+        prompt = str(api_cfg.get("prompt") or "")
+        prompt = (
+            prompt.replace("{recent}", recent)
+            .replace("{last_bot}", str(body.get("last_bot") or "(还没说过话)"))
+            .replace("{message}", message)
+        )
+        base, key, model = _judge_api_credentials(api_cfg)
+        if not key:
+            return JSONResponse({"ok": False, "msg": "第三方判官还没有可用密钥"})
+        started = time.time()
+        try:
+            with httpx.Client(timeout=15) as client:
+                resp = client.post(
+                    f"{base}/chat/completions",
+                    headers={"Authorization": f"Bearer {key}"},
+                    json={
+                        "model": model,
+                        "messages": [{"role": "user", "content": prompt}],
+                        "max_tokens": int(api_cfg.get("max_tokens", 2) or 2),
+                        "temperature": float(api_cfg.get("temperature", 0) or 0),
+                        "thinking": {"type": "disabled"},
+                    },
+                )
+                resp.raise_for_status()
+                payload = resp.json()
+            verdict = payload["choices"][0]["message"]["content"].strip()
+        except Exception as exc:  # noqa: BLE001 - surface the failure in the UI
+            return JSONResponse({"ok": False, "msg": f"第三方判官调用失败：{exc}"})
+        usage = payload.get("usage") or {}
+        return JSONResponse(
+            {
+                "verdict": verdict[:4],
+                "source": f"API 判定（{model}）",
+                "ms": int((time.time() - started) * 1000),
+                "tokens": int(usage.get("total_tokens") or 0),
+            }
+        )
+
     data = read_json(JUDGE_FILE, {"prompt": DEFAULT_JUDGE_PROMPT})
 
     for kw in data.get("ignore", []):

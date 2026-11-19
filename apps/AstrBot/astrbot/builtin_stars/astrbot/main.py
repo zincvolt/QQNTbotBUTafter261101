@@ -296,6 +296,16 @@ class Main(star.Star):
         ):
             return
 
+        # 记住 bot 最近一句，第三方判官才能判断“你不是猫吗怎么汪汪叫”这类追问
+        if self.group_chat_context:
+            try:
+                self.group_chat_context.note_bot_reply(
+                    event.unified_msg_origin,
+                    getattr(response, "completion_text", "") or "",
+                )
+            except Exception:
+                pass
+
         settings = self.context.get_config(umo=event.unified_msg_origin).get(
             "provider_ltm_settings",
             {},
