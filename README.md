@@ -66,11 +66,14 @@ stop-all.ps1           一键停止
 
 ## 接手指引
 
-1. 先读 [docs/HANDOFF.md](docs/HANDOFF.md)——5 分钟建立全局认知
-2. 按主题查 [docs/](docs/) 下其他文档
-3. 改完代码跑 `scripts/verify.ps1` 验证（尤其 AstrBot 升级后查补丁是否还在）
+1. **想把它跑起来** → 看 [部署指引 docs/DEPLOY.md](docs/DEPLOY.md)（从零搭建 / 同步代码 / 验证清单）
+2. 先读 [docs/HANDOFF.md](docs/HANDOFF.md)——5 分钟建立全局认知
+3. 按主题查 [docs/](docs/) 下其他文档
+4. 改完代码跑 `scripts/verify.ps1` 验证（尤其 AstrBot 升级后查补丁是否还在）
 
 ## 部署提示
+
+> 完整步骤见 [部署指引 docs/DEPLOY.md](docs/DEPLOY.md)，下面只是速记。
 
 - 主模型、判官、向量、OCR/VL 等模型服务在另一目录 `D:\LLM`，本仓库只调用不改它
 - `data/cmd_config.json` 里的 `CHANGE_ME` 需替换为真实值
