@@ -269,7 +269,7 @@ handler 优先级（闸门 > 指令 > 纯监听），替代各插件的 maxsize 
 | 插件 | 它做什么 | 在哪配 |
 |---|---|---|
 | `astrbot_plugin_peer` | 人格注入、判官闸门、@ 队列、表情附带、输出后处理 | `data\reply.json`、`main.py` |
-| `astrbot_plugin_vision_context` | 图片 OCR/描述缓存、表情包入库、群图上下文 | 自动 |
+| `astrbot_plugin_vision_context` | 图片 OCR/描述缓存、表情包入库、图上下文（群按群号、私聊按 `u<QQ>` 分 session；私聊与 `/私聊` 白名单同口径） | 自动 |
 | `builtin_commands` | 上面第 2 节 | — |
 
 ---

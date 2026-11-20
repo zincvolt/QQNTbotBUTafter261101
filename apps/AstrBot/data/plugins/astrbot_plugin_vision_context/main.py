@@ -27,7 +27,7 @@ from astrbot.api.provider import ProviderRequest
 
 # 指令自声明（插件开发规范要求，见 docs/PLUGIN-DEV.md）：本插件无斜线指令
 DECLARED_COMMANDS: dict[str, tuple[str, str]] = {}
-DECLARED_BEHAVIOR = "无斜线指令：为 /读图 提供图片上下文缓存与同图去重（被动组件）"
+DECLARED_BEHAVIOR = "无斜线指令：为 /读图 提供图片上下文缓存与同图去重（群聊+私聊，私聊与 /私聊 白名单同口径）"
 
 ROOT = Path(r"D:\QQNTBOT")
 BOT_DB = ROOT / "apps" / "AstrBot" / "data" / "data_v4.db"
@@ -205,6 +205,27 @@ def _allowed_groups() -> set[str]:
     except Exception:  # noqa: BLE001
         return set()
     return {str(e) for e in entries if str(e).isdigit()}
+
+
+def _private_watch(qq: str) -> bool:
+    """Whether background captioning should run for this private-chat user.
+
+    与 /私聊 白名单同一口径：总闸关（enable_id_white_list=False）= 谁都放；
+    总闸开 = 只放 id_whitelist 里 `qq:FriendMessage:<qq>` 那些人。
+    """
+    cfg_path = ROOT / "apps" / "AstrBot" / "data" / "cmd_config.json"
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
+        ps = cfg["platform_settings"]
+        if not ps.get("enable_id_white_list", False):
+            return True
+        entries = ps.get("id_whitelist", [])
+    except Exception:  # noqa: BLE001
+        return False
+    privs = {
+        str(e).rsplit(":", 1)[-1] for e in entries if "FriendMessage" in str(e)
+    }
+    return qq in privs
 
 
 CMD_CONFIG = ROOT / "apps" / "AstrBot" / "data" / "cmd_config.json"
@@ -498,12 +519,24 @@ class Main(star.Star):
                 logger.warning(f"[vision] flash 描述失败: {exc}")
         return None
 
-    @filter.event_message_type(filter.EventMessageType.GROUP_MESSAGE)
+    @filter.event_message_type(filter.EventMessageType.ALL)
     async def watch_images(self, event: AstrMessageEvent) -> None:
-        """Caption every image posted in an allowlisted group."""
+        """Caption images posted in allowlisted groups and private chats.
+
+        私聊图进缓存是省 token 的关键：第三方模式下 peer 见到有缓存的图
+        就用文字描述替换原图（一张原图 1000~2000 token）。私聊 session
+        key 用 ``u<qq>``，群聊用群号，互不串。
+        """
         group = str(event.get_group_id() or "")
-        if group not in _allowed_groups():
-            return
+        if group:
+            if group not in _allowed_groups():
+                return
+            session = group
+        else:
+            sender = str(event.get_sender_id() or "")
+            if not sender or not _private_watch(sender):
+                return
+            session = f"u{sender}"
         # 消息本体里的图 + 引用消息里的图都算。「引用一张图问 bot」很常见，
         # 引用里的图不收进 ring buffer 的话，模型永远只能说看不到
         images = [m for m in event.get_messages() if isinstance(m, Image)]
@@ -513,8 +546,6 @@ class Main(star.Star):
                 images += [m for m in chain if isinstance(m, Image)]
         if not images:
             return
-        umo = event.unified_msg_origin
-        group_key = umo.rsplit("_", 1)[-1]
         seen_refs: set[str] = set()
         for comp in images[:3]:
             ref = self._image_ref(comp)
@@ -522,13 +553,13 @@ class Main(star.Star):
                 continue
             seen_refs.add(ref)
             self._inflight.add(ref)
-            asyncio.create_task(self._store_caption(group_key, ref))
+            asyncio.create_task(self._store_caption(session, ref))
 
-    async def _store_caption(self, group_key: str, ref: str) -> None:
+    async def _store_caption(self, session: str, ref: str) -> None:
         """Caption one image once, then reuse the stored text forever.
 
         Args:
-            group_key: Group the image was posted in.
+            session: Group number, or ``u<qq>`` for a private chat.
             ref: Where to read the image from.
         """
         global _GC_AT
@@ -542,7 +573,7 @@ class Main(star.Star):
             # 同一张图（表情包会反复刷）只识一次，之后 0 秒 0 token 返回
             cached = cache_get(sha)
             if cached:
-                self._recent[group_key].append((time.time(), cached))
+                self._recent[session].append((time.time(), cached))
                 logger.info(f"[vision] cache hit {sha[:8]}")
                 return
 
@@ -551,7 +582,7 @@ class Main(star.Star):
             if known:
                 pack, category, desc = known
                 note = f"[表情库·{category}] {desc}"
-                self._recent[group_key].append((time.time(), note))
+                self._recent[session].append((time.time(), note))
                 logger.info(f"[vision] known meme ({pack}/{category})")
                 return
 
@@ -560,7 +591,7 @@ class Main(star.Star):
             text = await self._caption(ref, len(data), data)
             if text:
                 cache_put(sha, text, len(data))
-                self._recent[group_key].append((time.time(), text))
+                self._recent[session].append((time.time(), text))
                 logger.info(f"[vision] captioned {sha[:8]}: {text[:40]}")
 
             now = time.time()
@@ -622,11 +653,18 @@ class Main(star.Star):
 
     @filter.on_llm_request()
     async def inject_context(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
-        """Add recent image captions to the prompt."""
+        """Add recent image captions to the prompt (group and private)."""
         group = str(event.get_group_id() or "")
-        if not group:
-            return
-        buf = self._recent.get(group)
+        if group:
+            session = group
+            scope = "群里"
+        else:
+            sender = str(event.get_sender_id() or "")
+            if not sender:
+                return
+            session = f"u{sender}"
+            scope = "私聊里"
+        buf = self._recent.get(session)
         if not buf:
             return
         now = time.time()
@@ -647,7 +685,7 @@ class Main(star.Star):
             return
         joined = "\n".join(reversed(picked))
         req.system_prompt = (req.system_prompt or "") + (
-            "\n\n[群里最近发过的图（按时间从早到晚），对方问「这图/刚才那张图」"
+            f"\n\n[{scope}最近发过的图（按时间从早到晚），对方问「这图/刚才那张图」"
             "或引用消息带图时，优先对照下面的描述回答，不要说看不到]\n"
             + joined
         )

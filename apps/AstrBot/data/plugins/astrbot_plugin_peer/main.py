@@ -1152,23 +1152,63 @@ def _vision_watches(group_id: str) -> bool:
     return group_id in (groups or set())
 
 
+_PRIV_WATCH_CACHE: tuple[float, tuple[bool, set[str]]] = (0.0, (False, set()))
+
+
+def _private_vision_watches(qq: str) -> bool:
+    """Check whether ``vision_context`` also captions this private chat.
+
+    Same rules as the ``/私聊`` whitelist: when ``enable_id_white_list`` is
+    off everyone is allowed; when on, only ``qq:FriendMessage:<qq>`` entries.
+    """
+    global _PRIV_WATCH_CACHE
+    cfg_path = Path(r"D:\QQNTBOT\apps\AstrBot\data\cmd_config.json")
+    try:
+        mtime = cfg_path.stat().st_mtime
+    except OSError:
+        return False
+    stamp, cached = _PRIV_WATCH_CACHE
+    if mtime != stamp:
+        try:
+            cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
+            ps = cfg["platform_settings"]
+            entries = ps.get("id_whitelist", [])
+            cached = (not ps.get("enable_id_white_list", False), {
+                str(e).rsplit(":", 1)[-1]
+                for e in entries
+                if "FriendMessage" in str(e)
+            })
+        except Exception:  # noqa: BLE001
+            cached = (False, set())
+        _PRIV_WATCH_CACHE = (mtime, cached)
+    open_all, privs = cached
+    return open_all or qq in privs
+
+
 async def _wait_for_captions(
-    unseen: list[tuple[str, str, int]], group_id: str
+    unseen: list[tuple[str, str, int]], group_id: str, sender_id: str = ""
 ) -> float:
     """Give the background captioner a few seconds before sending raw images.
 
     Sending an image costs 1000~2000 tokens; waiting ~2 s for the caption costs
     nothing and usually wins. Bounded by ``VISION_WAIT_SECONDS`` and skipped
-    entirely when the captioner is not watching this group.
+    entirely when the captioner is not watching this chat (group or private).
 
     Args:
         unseen: ``(url, sha, size)`` triples with no cached caption yet.
-        group_id: Current group number.
+        group_id: Current group number, empty in private chats.
+        sender_id: Sender QQ in private chats (ignored for groups).
 
     Returns:
         Seconds actually spent waiting (0 when nothing was waited for).
     """
-    if not group_id or not _vision_watches(group_id):
+    if group_id:
+        if not _vision_watches(group_id):
+            return 0.0
+    elif sender_id:
+        if not _private_vision_watches(sender_id):
+            return 0.0
+    else:
         return 0.0
     # 云端兜底只补 ≤1.5 MiB 的图，更大的等也等不到
     shas = [sha for _u, sha, size in unseen if sha and size <= VISION_STICKER_BYTES]
@@ -1609,11 +1649,15 @@ class Main(star.Star):
                     # 一张图就是 1000~2000 token，能省就省
                     total = len(req.image_urls)
                     group_id = str(event.get_group_id() or "")
+                    sender_id = "" if group_id else str(event.get_sender_id() or "")
                     notes, unseen, budget = _split_images(req.image_urls)
                     if unseen:
                         # 有图就多等几秒：后台 flash 补描述通常 1.5 秒就回来，
                         # 等到了就不用把原图发出去（省 1500 token，答案还更稳）
-                        waited = await _wait_for_captions(unseen, group_id)
+                        # 私聊也等：vision_context 现在私聊也写缓存
+                        waited = await _wait_for_captions(
+                            unseen, group_id, sender_id
+                        )
                         if waited >= 0.5:
                             logger.info(
                                 f"[peer] waited {waited:.1f}s for background caption"
