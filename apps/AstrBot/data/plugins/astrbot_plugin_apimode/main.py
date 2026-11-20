@@ -23,6 +23,7 @@ from __future__ import annotations
 import json
 import re
 import subprocess
+import sys
 import time
 from datetime import datetime
 from pathlib import Path
@@ -35,7 +36,13 @@ STATE = ROOT / "data" / "api_mode.json"
 CONFIG = ROOT / "apps" / "AstrBot" / "data" / "cmd_config.json"
 REPLY = ROOT / "data" / "reply.json"
 WORDS = ROOT / "data" / "review_words.txt"
-ADMINS = {"1154487120"}
+
+# 权限归 access 统一管理，不再自留 ADMINS 名单
+sys.path.insert(0, str(ROOT / "apps" / "AstrBot" / "data" / "plugins" / "astrbot_plugin_access"))
+try:
+    from unified_perm import is_admin as _unified_is_admin
+except ImportError:  # access 插件不在时安全降级：一律拒绝管理操作
+    _unified_is_admin = lambda e: False  # noqa: E731
 
 DEFAULT_WORDS = [
     "习近平", "共产党", "台独", "六四", "天安门事件", "法轮功",
@@ -329,7 +336,8 @@ class Main(star.Star):
         logger.info("[apimode] ready")
 
     def _is_admin(self, event: AstrMessageEvent) -> bool:
-        return str(event.get_sender_id()) in ADMINS
+        # 权限归 access 统一判定（super_admins ∪ admins_id ∪ FURCON_ADMINS ∪ 群管理）
+        return _unified_is_admin(event)
 
     @filter.on_llm_request()
     async def budget_gate(self, event: AstrMessageEvent, req) -> None:

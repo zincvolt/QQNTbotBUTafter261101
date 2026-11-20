@@ -15,6 +15,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+import sys
 from pathlib import Path
 
 import httpx
@@ -23,7 +24,13 @@ from astrbot.api.event import AstrMessageEvent, filter
 
 ROOT = Path(r"D:\QQNTBOT")
 STATE = ROOT / "data" / "vision_mode.json"
-ADMINS = {"1154487120"}
+
+# 权限归 access 统一管理，不再自留 ADMINS 名单
+sys.path.insert(0, str(ROOT / "apps" / "AstrBot" / "data" / "plugins" / "astrbot_plugin_access"))
+try:
+    from unified_perm import is_admin as _unified_is_admin
+except ImportError:  # access 插件不在时安全降级：一律拒绝管理操作
+    _unified_is_admin = lambda e: False  # noqa: E731
 
 
 def load_vision_state() -> dict:
@@ -140,7 +147,7 @@ class Main(star.Star):
         if not body.startswith("读图"):
             return
 
-        if str(event.get_sender_id()) not in ADMINS:
+        if not _unified_is_admin(event):
             await event.send(event.plain_result("只有管理员能改读图方式"))
             event.stop_event()
             return

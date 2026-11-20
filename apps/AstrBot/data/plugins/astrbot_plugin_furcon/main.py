@@ -17,6 +17,7 @@ import json
 import os
 import re
 import sqlite3
+import sys
 import time
 from collections import Counter
 from datetime import datetime, timedelta, timezone
@@ -110,12 +111,17 @@ FONT_CANDIDATES += [
     "/System/Library/Fonts/STHeiti Medium.ttc",
 ]
 
-# Bot names that trigger "call by name" mode, and the QQ numbers allowed to
-# run admin commands. Both can be overridden via environment variables;
-# multiple names/admins are joined with "|" / "," respectively.
+# Bot names that trigger "call by name" mode (env-overridable).
 NAME_CALL = os.environ.get("FURCON_NAME_CALL", r"(阿灰|小灰|灰狼)")
-_admins_raw = os.environ.get("FURCON_ADMINS", "1154487120")
-ADMINS = {x.strip() for x in re.split(r"[,\s]+", _admins_raw) if x.strip()}
+
+# 权限归 access 统一管理，不再自留 ADMINS 名单（FURCON_ADMINS 仍被 access 兼容读取）
+sys.path.insert(0, str(ROOT / "apps" / "AstrBot" / "data" / "plugins" / "astrbot_plugin_access"))
+try:
+    from unified_perm import admin_qqs as _admin_qqs
+    from unified_perm import is_admin as _unified_is_admin
+except ImportError:  # access 插件不在时安全降级：一律拒绝管理操作
+    _unified_is_admin = lambda e: False  # noqa: E731
+    _admin_qqs = lambda: []  # noqa: E731
 
 # Commands with their own syntax are checked before the compositional event
 # matcher.  Keeping them separate stops e.g. "/关心 苏州小聚" (which contains
@@ -1050,9 +1056,9 @@ class Main(star.Star):
         group_id = str(event.get_group_id() or "")
         sender = str(event.get_sender_id() or "")
 
-        # 管理员开关命令（私聊/群聊都能用）
+        # 管理员开关命令（私聊/群聊都能用）——兽聚功能开关，按群生效
         if key in ("enable_on", "enable_off"):
-            if sender not in ADMINS:
+            if not _unified_is_admin(event):
                 await event.send(event.plain_result("只有管理员能改开关"))
                 event.stop_event()
                 return
@@ -1071,9 +1077,10 @@ class Main(star.Star):
             if key == "help":
                 pass
             else:
+                names = "/".join(_admin_qqs()) or "管理员"
                 await event.send(
                     event.plain_result(
-                        f"未启用请联系本机管理员 {'/'.join(sorted(ADMINS))} owo"
+                        f"未启用请联系本机管理员 {names} owo"
                     )
                 )
                 event.stop_event()
@@ -1085,7 +1092,7 @@ class Main(star.Star):
         self._busy.add(umo)
         try:
             if key in ("watch", "watch_off"):
-                if str(event.get_sender_id()) not in ADMINS:
+                if not _unified_is_admin(event):
                     await event.send(event.plain_result("这个只有管理员能设"))
                     event.stop_event()
                     return

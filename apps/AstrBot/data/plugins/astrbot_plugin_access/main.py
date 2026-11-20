@@ -55,6 +55,11 @@ _CMD_LISTENER_MODS = (
 # ---------- 指令权限表默认值 ----------
 # prefix=前缀匹配（带参数指令）; exact=全等（短/泛用词防误伤）; contains=包含
 # （仅唤醒时判定，全部为公开级，误命中无害）。级别一律以表为准，可在线改。
+#
+# 【两套开关必须分清作用域】
+#   兽聚功能开关（对群）：启用/关闭族 → furcon_enabled.json 按 group_id 存
+#   聊天功能开关（对个人）：/私聊 允许/拒绝 → id_whitelist 按 QQ 存 + 总闸
+#   两者状态独立、互不影响，指令表里也分列标注。
 DEFAULT_PERM: dict = {
     "prefix": {
         # 内置
@@ -63,6 +68,7 @@ DEFAULT_PERM: dict = {
         "stats": "user", "provider": "user",
         "dashboard_update": "admin", "set": "user", "unset": "user",
         # 本插件（细粒度动作由各 handler 内部再判）
+        # 「私聊」= 聊天功能开关，对个人生效（id_whitelist 按 QQ 存）
         "私聊": "user", "管理员": "user", "权限": "super",
         # ltm
         "记忆": "user", "忘记": "user",
@@ -80,6 +86,7 @@ DEFAULT_PERM: dict = {
     },
     "exact": {
         "用量": "user", "额度查询": "user",
+        # 兽聚功能开关，对群生效（furcon_enabled.json 按 group_id 存）
         "启用": "admin", "启用功能": "admin", "开启功能": "admin", "打开功能": "admin",
         "关闭": "admin", "关闭功能": "admin", "停用功能": "admin", "禁用功能": "admin",
     },
@@ -139,8 +146,11 @@ def _furcon_admins() -> set[str]:
 
 
 class MyPlugin(star.Star):
-    def __init__(self, context: star.Context) -> None:
-        super().__init__(context)
+    def __init__(self, context: star.Context, config=None) -> None:
+        # star_manager 以 config=plugin_config 关键字实例化；签名不收 config 会
+        # 抛 TypeError 被框架静默降级为无 config 构造，super_admins 读空（踩过）。
+        super().__init__(context, config=config)
+        self.config = config
         self._perm: dict = self._load_perm()
         # 热加载/启动都跑一遍分档；on_astrbot_loaded 时全插件就位再终跑
         self._enforce_bands()
