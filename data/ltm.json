@@ -1,0 +1,9 @@
+{
+  "enabled": true,
+  "scan_interval": 300,
+  "scan_budget": 3,
+  "user_cooldown": 1800,
+  "extract_cooldown": 900,
+  "max_tokens": 300,
+  "third_party_scan": true
+}
