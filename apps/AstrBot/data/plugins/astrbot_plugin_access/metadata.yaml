@@ -1,0 +1,4 @@
+name: astrbot_plugin_access
+desc: 聊天内权限管理指令（/私聊 白名单、/管理员 分组），超级管理员/管理员两级权限
+author: local
+version: 1.0.0
