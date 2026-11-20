@@ -119,9 +119,28 @@ DENY_TEXT = {
     LV_SUPER: "这个指令只有我的最高管理员能用。",
 }
 
-# ---------- 一图流绘卡（长输出用图，短确认仍用文字） ----------
-sys.path.insert(0, str(Path(__file__).parent))
-from card_render import render_text_card  # noqa: E402
+# ---------- 一图流绘卡（惰性导入，与权限功能彻底解耦） ----------
+# 绘卡是锦上添花，绝不能影响权限加载。import 全放函数内部。
+def _render_card(title: str, lines: list[str], footer: str = ""):
+    """惰性渲染图卡，失败返回 None。"""
+    try:
+        import sys as _sys
+        _sys.path.insert(0, str(Path(__file__).parent))
+        from card_render import render_text_card
+        return render_text_card(title, lines, footer=footer)
+    except Exception:  # noqa: BLE001 - 绘卡坏了不影响权限
+        return None
+
+def _help_result(event, title: str, lines: list[str]) -> "object":
+    """帮助/列表输出：绘卡可用给图，否则降级纯文字。"""
+    path = _render_card(title, lines)
+    if path is not None:
+        try:
+            return event.image_result(str(path))
+        except Exception:  # noqa: BLE001
+            pass
+    text = title + "\n" + "\n".join(l for l in lines if l and not l.startswith("#"))
+    return event.plain_result(text)
 
 PRIV_HELP_LINES = [
     "## 聊天功能开关（对个人）",
@@ -362,46 +381,77 @@ class MyPlugin(star.Star):
         return LV_USER
 
     # ================= 鉴权闸门 =================
+    # gate 是唯一入口（GATE_PRIORITY 最先跑），三个指令直接在这里处理。
+    # 不依赖 @filter.command 分派——避免被其他 listener 抢先（踩过）。
 
     @filter.event_message_type(filter.EventMessageType.ALL, priority=GATE_PRIORITY)
     async def gate(self, event: AstrMessageEvent) -> None:
-        """指令最先过闸：级别不够直接拦，够了就放行。"""
-        cmd = self._match_cmd(event)
-        if not cmd:
-            return
-        need = self._perm_level(cmd)
-        level = self._level(event)
-        if level >= need:
-            # 放行；给「这条已被指令认领」打标，内置群聊上下文会跳过记史
-            try:
-                extra = event.get_extra("handlers_parsed_params", None)
-                if extra is not None and not extra:
-                    extra["__access_cmd__"] = {"cmd": cmd}
-            except Exception:  # noqa: BLE001
-                pass
-            return
-        yield event.plain_result(
-            DENY_TEXT.get(need, "这个指令你用不了喵。")
-        )
-        event.stop_event()
+        """指令最先过闸：级别不够直接拦，够了就放行；access 自己的指令直接处理。永不崩溃。"""
+        try:
+            cmd = self._match_cmd(event)
+            if not cmd:
+                return
+
+            # ---- access 自己的三个指令直接处理，不走 CommandFilter ----
+            if cmd in ("权限", "私聊", "管理员"):
+                level = self._level(event)
+                body = re.sub(r"^\s*[/／]\s*", "", (event.message_str or "")).strip()
+                rest = body[len(cmd):].strip()
+                parts = rest.split(None, 2) if rest else []
+                action = parts[0] if parts else ""
+                target = parts[1] if len(parts) > 1 else ""
+                lv = parts[2] if len(parts) > 2 else ""
+                # 直接 send 发送（furcon 同款通道）：yield 通道会被 peer 的
+                # decorate_result 误杀——图卡链无纯文本被判「空回复」清空并停事件，
+                # respond 阶段永不执行（踩过，2026-11-20）。send 不走 result 处理。
+                if cmd == "权限":
+                    async for r in self._do_perm(event, level, action, target, lv):
+                        await event.send(r)
+                elif cmd == "私聊":
+                    async for r in self._do_private(event, level, action, target):
+                        await event.send(r)
+                else:
+                    async for r in self._do_admin(event, level, action, target):
+                        await event.send(r)
+                event.stop_event()
+                return
+
+            # ---- 其他指令：只做鉴权，放行给各插件 ----
+            need = self._perm_level(cmd)
+            level = self._level(event)
+            if level >= need:
+                try:
+                    extra = event.get_extra("handlers_parsed_params", None)
+                    if extra is not None and not extra:
+                        extra["__access_cmd__"] = {"cmd": cmd}
+                except Exception:  # noqa: BLE001
+                    pass
+                return
+            await event.send(
+                event.plain_result(DENY_TEXT.get(need, "这个指令你用不了喵。"))
+            )
+            event.stop_event()
+        except Exception as exc:  # noqa: BLE001 - gate 绝不崩溃，放行让其他插件处理
+            logger.warning(f"[access] gate error (pass-through): {exc}")
 
     # ================= /权限（指令权限表） =================
 
-    @filter.command("权限")
-    async def perm_cmd(
-        self, event: AstrMessageEvent, action: str = "", target: str = "", lv: str = ""
+    async def _do_perm(
+        self, event: AstrMessageEvent, level: int, action: str, target: str = "", lv: str = ""
     ) -> None:
         """Manage the per-command permission table."""
-        level = self._level(event)
         action = (action or "").strip()
         target = (target or "").strip().lstrip("/／").strip()
         lv = (lv or "").strip()
 
         if not action or action in ("帮助", "help"):
-            yield event.image_result(str(render_text_card("权限指令帮助", PERM_HELP_LINES)))
+            yield _help_result(event, "权限指令帮助", PERM_HELP_LINES)
             return
         if action == "列表":
-            yield event.image_result(str(self._perm_card()))
+            try:
+                yield event.image_result(str(self._perm_card()))
+            except Exception:  # noqa: BLE001 - 绘卡失败降级文字
+                yield event.plain_result(self._perm_text_fallback())
             return
         if level < LV_SUPER:
             yield event.plain_result("这个指令只有我的最高管理员能用。")
@@ -460,7 +510,7 @@ class MyPlugin(star.Star):
             yield event.plain_result(f"{target} 已恢复默认级别。")
             return
 
-        yield event.image_result(str(render_text_card("权限指令帮助", PERM_HELP_LINES)))
+        yield _help_result(event, "权限指令帮助", PERM_HELP_LINES)
 
     def _find_perm(self, name: str) -> tuple[str, str, str] | None:
         """定位指令在表里的 (section, key, word)，三个区都找。"""
@@ -468,6 +518,25 @@ class MyPlugin(star.Star):
             if name in self._perm.get(section, {}):
                 return section, name, self._perm[section][name]
         return None
+
+    def _perm_text_fallback(self) -> str:
+        """绘卡失败时的纯文字权限表。"""
+        lines = []
+        for section, title in (
+            ("prefix", "带参数指令"),
+            ("exact", "固定指令"),
+            ("contains", "包含词（唤醒时）"),
+        ):
+            entries = self._perm.get(section, {})
+            if not entries:
+                continue
+            lines.append(f"【{title}】")
+            for key in sorted(entries, key=lambda k: (LV_FROM_WORD.get(entries[k], 0), k)):
+                word = entries[key]
+                lines.append(f"  {key} → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), word)}")
+        word = self._perm.get("unknown_slash", "user")
+        lines.append(f"未知斜线指令 → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), '公开')}")
+        return "指令权限表：\n" + "\n".join(lines)
 
     def _perm_card(self) -> Path:
         """全量指令权限表渲染成一图流卡片。"""
@@ -491,21 +560,19 @@ class MyPlugin(star.Star):
         lines.append("")
         word = self._perm.get("unknown_slash", "user")
         lines.append(f"未知斜线指令 → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), '公开')}")
-        return render_text_card("指令权限表", lines, footer="可在线改：/权限 设置 <指令> <级别>")
+        return _render_card("指令权限表", lines, footer="可在线改：/权限 设置 <指令> <级别>")
 
     # ================= /私聊（白名单） =================
 
-    @filter.command("私聊")
-    async def private_chat(
-        self, event: AstrMessageEvent, action: str = "", target: str = ""
+    async def _do_private(
+        self, event: AstrMessageEvent, level: int, action: str, target: str = ""
     ) -> None:
         """Manage the private-chat whitelist."""
-        level = self._level(event)
         action = (action or "").strip()
         target = _norm_qq(target)
 
         if not action or action in ("帮助", "help"):
-            yield event.image_result(str(render_text_card("私聊权限帮助", PRIV_HELP_LINES)))
+            yield _help_result(event, "私聊权限帮助", PRIV_HELP_LINES)
             return
         if action == "列表":
             yield event.plain_result(self._wl_text())
@@ -564,7 +631,7 @@ class MyPlugin(star.Star):
             )
             return
 
-        yield event.image_result(str(render_text_card("私聊权限帮助", PRIV_HELP_LINES)))
+        yield _help_result(event, "私聊权限帮助", PRIV_HELP_LINES)
 
     def _wl_text(self) -> str:
         try:
@@ -585,17 +652,15 @@ class MyPlugin(star.Star):
 
     # ================= /管理员 =================
 
-    @filter.command("管理员")
-    async def admin_cmd(
-        self, event: AstrMessageEvent, action: str = "", target: str = ""
+    async def _do_admin(
+        self, event: AstrMessageEvent, level: int, action: str, target: str = ""
     ) -> None:
         """Manage the admin list (super admin only)."""
-        level = self._level(event)
         action = (action or "").strip()
         target = _norm_qq(target)
 
         if not action or action in ("帮助", "help"):
-            yield event.image_result(str(render_text_card("管理员帮助", ADMIN_HELP_LINES)))
+            yield _help_result(event, "管理员帮助", ADMIN_HELP_LINES)
             return
         if level < LV_SUPER:
             yield event.plain_result("这个指令只有我的最高管理员能用。")
@@ -647,4 +712,4 @@ class MyPlugin(star.Star):
             yield event.plain_result(f"{target} 的管理员撤掉了。")
             return
 
-        yield event.image_result(str(render_text_card("管理员帮助", ADMIN_HELP_LINES)))
+        yield _help_result(event, "管理员帮助", ADMIN_HELP_LINES)
