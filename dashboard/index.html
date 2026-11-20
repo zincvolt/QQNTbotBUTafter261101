@@ -346,6 +346,17 @@
       <span class="hint" id="waterMsg"></span>
     </div>
   </div>
+
+  <div class="panel" data-caps="config,botdb">
+    <h2>群聊开关 <span class="meta">对应 /群聊 /进群提醒 指令 · 主动发言默认关 · 保存即时生效</span></h2>
+    <div class="plist" id="flagsList"><span class="hint">加载中…</span></div>
+    <div style="margin-top:10px">
+      <button onclick="saveGroupFlags()">保存群聊开关</button>
+      <span class="hint" id="flagsMsg"></span>
+      <span class="hint" style="margin-left:14px">进群提醒文本预览（peer 插件发送）：</span>
+      <span class="meta" id="welcomePreview"></span>
+    </div>
+  </div>
 </section>
 
 <!-- ============ 判官 ============ -->
@@ -870,6 +881,7 @@ const PANEL_BY_URL = [
   [/\/api\/logs/,          'logBox'],
   [/\/api\/access/,        'groups'],
   [/\/api\/water/,         'waterList'],
+  [/\/api\/group_flags/,   'flagsList'],
   [/\/api\/persona/,       'persona'],
   [/\/api\/judge\/api/,    'jaPrompt'],
   [/\/api\/judge\/test/,   'testMsg'],
@@ -1187,6 +1199,34 @@ async function saveWater() {
     body: JSON.stringify({items})
   })).json();
   document.getElementById('waterMsg').textContent = r.msg || '已保存';
+}
+
+async function loadGroupFlags() {
+  const r = await (await fetch('/api/group_flags')).json();
+  document.getElementById('flagsList').innerHTML = r.items.map(g => `
+    <div class="pitem" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
+      <span style="color:var(--text)">${g.id}${g.whitelisted ? '' : ' <span class="meta">未在白名单</span>'}</span>
+      <label style="margin:0;display:flex;align-items:center;gap:6px"><input type="checkbox" data-gid="${g.id}" data-key="proactive" ${g.proactive ? 'checked' : ''}> 主动发言</label>
+      <label style="margin:0;display:flex;align-items:center;gap:6px"><input type="checkbox" data-gid="${g.id}" data-key="reply_at" ${g.reply_at ? 'checked' : ''}> 接话（艾特）</label>
+      <label style="margin:0;display:flex;align-items:center;gap:6px"><input type="checkbox" data-gid="${g.id}" data-key="welcome" ${g.welcome ? 'checked' : ''}> 进群提醒</label>
+    </div>`).join('') || '<span class="hint">还没有可用群</span>';
+  document.getElementById('welcomePreview').textContent = r.welcome_text || '（未取到）';
+}
+
+async function saveGroupFlags() {
+  const boxes = [...document.querySelectorAll('#flagsList input[type=checkbox]')];
+  const byGid = {};
+  for (const cb of boxes) {
+    const gid = cb.dataset.gid;
+    byGid[gid] = byGid[gid] || { id: gid };
+    byGid[gid][cb.dataset.key] = cb.checked;
+  }
+  document.getElementById('flagsMsg').textContent = '保存中…';
+  const r = await (await fetch('/api/group_flags', {
+    method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({items: Object.values(byGid)})
+  })).json();
+  document.getElementById('flagsMsg').textContent = r.msg || '已保存';
 }
 
 async function loadPersona() {
@@ -1819,6 +1859,7 @@ loadCapabilities();   // 先探测能力，缺失面板立即置灰；失败的�
 refresh();
 loadAccess();
 loadWater();
+loadGroupFlags();
 loadContexts();
 loadAutoReply();
 loadLtmRecent();

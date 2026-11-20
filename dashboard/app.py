@@ -1379,6 +1379,78 @@ async def save_water(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "msg": "已保存，下一次判定周期生效（约 1 分钟）"})
 
 
+GROUP_FLAGS_FILE = (
+    PLUGIN_DIR / "astrbot_plugin_access" / "group_flags.json"
+)
+GROUP_FLAG_DEFAULTS = {"proactive": False, "reply_at": True, "welcome": False}
+FLAG_NAMES = {"proactive": "主动发言", "reply_at": "接话", "welcome": "进群提醒"}
+
+
+def _welcome_text() -> str:
+    """Pull WELCOME_TEXT from the access plugin via ast (no code execution)."""
+    path = PLUGIN_DIR / "astrbot_plugin_access" / "main.py"
+    try:
+        import ast
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="ignore"))
+        for node in tree.body:
+            if isinstance(node, ast.Assign) and any(
+                isinstance(t, ast.Name) and t.id == "WELCOME_TEXT"
+                for t in node.targets
+            ):
+                return ast.literal_eval(node.value)
+    except Exception:  # noqa: BLE001 - 预览拿不到就空着
+        pass
+    return ""
+
+
+@app.get("/api/group_flags")
+def get_group_flags() -> JSONResponse:
+    """Per-group proactive/reply/welcome switches (defaults match access)."""
+    saved = (read_json(GROUP_FLAGS_FILE, {"groups": {}}).get("groups")) or {}
+    rows = []
+    seen = set()
+    for gid in read_access()["groups"]:
+        conf = saved.get(gid) if isinstance(saved.get(gid), dict) else {}
+        row = {"id": gid, "whitelisted": True}
+        for key, default in GROUP_FLAG_DEFAULTS.items():
+            row[key] = bool(conf.get(key, default)) if isinstance(conf, dict) else default
+        rows.append(row)
+        seen.add(gid)
+    for item in known_groups():
+        if item["id"] in seen:
+            continue
+        conf = saved.get(item["id"]) if isinstance(saved.get(item["id"]), dict) else {}
+        row = {"id": item["id"], "whitelisted": False}
+        for key, default in GROUP_FLAG_DEFAULTS.items():
+            row[key] = bool(conf.get(key, default)) if isinstance(conf, dict) else default
+        rows.append(row)
+    return JSONResponse({"items": rows, "flag_names": FLAG_NAMES, "welcome_text": _welcome_text()})
+
+
+@app.post("/api/group_flags")
+async def save_group_flags(request: Request) -> JSONResponse:
+    """Merge-write per-group switches. Plugin loaders cache by mtime, no restart."""
+    body = await request.json()
+    raw = read_json(GROUP_FLAGS_FILE, {"groups": {}})
+    groups = raw.get("groups") or {}
+    changed = 0
+    for item in body.get("items", []):
+        gid = str(item.get("id", "")).strip()
+        if not gid.isdigit():
+            continue
+        entry = dict(groups.get(gid)) if isinstance(groups.get(gid), dict) else {}
+        entry.update(dict(GROUP_FLAG_DEFAULTS))
+        for key in GROUP_FLAG_DEFAULTS:
+            if key in item:
+                entry[key] = bool(item[key])
+        groups[gid] = entry
+        changed += 1
+    write_json(GROUP_FLAGS_FILE, {"groups": groups})
+    return JSONResponse(
+        {"ok": True, "msg": f"已保存 {changed} 个群，开关即时生效（无需重启）"}
+    )
+
+
 def available_models() -> list[str]:
     """Read preset names from the llama.cpp router config."""
     try:
