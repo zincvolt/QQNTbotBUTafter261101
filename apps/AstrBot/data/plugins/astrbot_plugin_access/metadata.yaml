@@ -1,4 +1,4 @@
 name: astrbot_plugin_access
-desc: 聊天内权限管理指令（/私聊 白名单、/管理员 分组），超级管理员/管理员两级权限
+desc: 权限闸门（/权限 /私聊 /管理员）：统一斜线指令鉴权、指令权限表在线编辑、主动回复冲突仲裁，替代各插件 maxsize 力大砖飞
 author: local
-version: 1.0.0
+version: 2.0.0

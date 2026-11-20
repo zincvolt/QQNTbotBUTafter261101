@@ -343,6 +343,7 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 | `scripts\restart-astrbot.ps1` | 只重启 AstrBot（不动 QQ，不用扫码） |
 | `apps\AstrBot\data\cmd_config.json` | AstrBot 主配置（provider/白名单/压缩等） |
 | `apps\AstrBot\data\plugins\astrbot_plugin_peer\` | 人设、闸门、水群、发图、文本处理 |
+| `apps\AstrBot\data\plugins\astrbot_plugin_access\` | 权限闸门：统一斜线指令鉴权（超管/管理/公开三级）、指令权限表在线编辑（/权限）、主动回复冲突仲裁（handler 分档替代 maxsize 力大砖飞） |
 | `apps\AstrBot\data\plugins\astrbot_plugin_ltm\` | 记忆提取与召回 |
 | `apps\AstrBot\data\plugins\astrbot_plugin_vision_context\` | 群图释义、表情库索引、收集器 |
 
