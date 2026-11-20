@@ -223,6 +223,38 @@ MAIN_JUDGE_KEY = "sk-llm-7d41c9e2"
 AUTOREPLY_CONFIG_PATH = Path(r"D:\QQNTBOT\data\autoreply.json")
 _autoreply_cache: dict = {"mtime": 0.0, "data": None}
 
+# access 插件 /群聊 指令写的群开关（与 autoreply.json 二选一即可关接话，
+# 两个面板口径一致：任一为关，判官在任何规则/LLM 调用之前就短路）
+GROUP_FLAGS_PATH = Path(
+    r"D:\QQNTBOT\apps\AstrBot\data\plugins\astrbot_plugin_access\group_flags.json"
+)
+_group_flags_cache: dict = {"mtime": 0.0, "data": {}}
+
+
+def load_group_flags() -> dict:
+    """Read access 插件的群开关，mtime 缓存。缺文件/缺群 = 接话默认开。
+
+    Returns:
+        ``{gid: {"proactive": bool, "reply_at": bool, "welcome": bool}}``。
+    """
+    global _group_flags_cache
+    try:
+        stat = GROUP_FLAGS_PATH.stat()
+    except OSError:
+        return _group_flags_cache["data"]
+    if _group_flags_cache["data"] and stat.st_mtime == _group_flags_cache["mtime"]:
+        return _group_flags_cache["data"]
+    try:
+        raw = json.loads(GROUP_FLAGS_PATH.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        return _group_flags_cache["data"]
+    data = {}
+    for gid, conf in (raw.get("groups") or {}).items():
+        if isinstance(conf, dict):
+            data[str(gid)] = conf
+    _group_flags_cache = {"mtime": stat.st_mtime, "data": data}
+    return data
+
 
 
 REPLY_CONFIG_PATH = Path(r"D:\QQNTBOT\data\reply.json")
@@ -686,6 +718,12 @@ class GroupChatContext:
         group_id = str(event.get_group_id() or "")
         if load_autoreply_config().get(group_id) is False:
             logger.debug(f"active_reply disabled for group {group_id}")
+            return False
+        # /群聊 接话关（access 插件 group_flags.json）：判官整体短路，
+        # 连召唤词也不放行——接话关就是关，喊名字也不接（@ 走 peer 闸门同规则）
+        flags = load_group_flags().get(group_id)
+        if flags is not None and flags.get("reply_at") is False:
+            logger.info(f"group judge | 接话关({group_id}) | {(event.message_str or '')[:30]}")
             return False
         if cfg["ar_whitelist"] and (
             event.unified_msg_origin not in cfg["ar_whitelist"]

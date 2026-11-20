@@ -393,7 +393,7 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 |---|---|
 | `core\pipeline\whitelist_check\stage.py` | 未授权私聊自动回一句；2026-11-20 加 `_has_real_content()`：空文本系统事件（聊天精灵引导等）/戳一戳/合并转发静默拦截，不再回未授权（此前空事件批量触发骚扰）；同日 `process()` 改为实时读配置（配合 astrbot_plugin_access 的 /私聊 指令在线改白名单，即时生效不用重启） |
 | `core\pipeline\respond\stage.py` | `human` 分段间隔（0.45s + 字数/7） |
-| `builtin_stars\astrbot\group_chat_context.py` | 判官 `method=judge` + 按群自动接话开关；2026-11-19 加本地/第三方双后端、追问直通、条数前处理、时间窗内消息过少时按条数兜底 |
+| `builtin_stars\astrbot\group_chat_context.py` | 判官 `method=judge` + 按群自动接话开关；2026-11-19 加本地/第三方双后端、追问直通、条数前处理、时间窗内消息过少时按条数兜底；2026-11-20 加读 access `group_flags.json`：`/群聊 接话关` 的群判官在规则/LLM 之前整体短路（连召唤词也不接，与 peer 的 @ 拦截同口径），判官 token 零浪费 |
 | `builtin_stars\astrbot\main.py` | 主动接话缺会话时自动创建；`on_llm_response` 记录 bot 最近一句给第三方判官 |
 | `builtin_stars\astrbot\main.py` | `GeneratorExit` 不算错误（stop 事件时不再刷红字） |
 | `core\updater.py` | 禁止自动升级（`LOCAL_UPDATES_DISABLED`），保护上面 5 处补丁 |
