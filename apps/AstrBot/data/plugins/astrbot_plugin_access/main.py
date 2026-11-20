@@ -55,6 +55,7 @@ _CMD_LISTENER_MODS = (
 
 # 本插件自声明指令（单拎时帮助/权限表自动读这里）
 DECLARED_COMMANDS = {
+    "/指令": ("所有人可用的指令列表（一图流）", "公开"),
     "/权限 列表": ("看全部指令和级别", "公开"),
     "/权限 检查 <指令>": ("看某指令当前级别", "超管"),
     "/权限 设置 <指令> <级别>": ("改指令级别", "超管"),
@@ -76,14 +77,17 @@ DECLARED_COMMANDS = {
 #   两者状态独立、互不影响，指令表里也分列标注。
 DEFAULT_PERM: dict = {
     "prefix": {
-        # 内置
-        "help": "user", "sid": "user", "name": "user",
-        "reset": "user", "stop": "user", "new": "user",
-        "stats": "user", "provider": "user",
-        "dashboard_update": "admin", "set": "user", "unset": "user",
+        # 内置——astr /help 含有的框架指令全部管理员（2026-11-20）：
+        # 框架自带的指令清单不对外暴露，普通用户看 /指令 那张公开卡
+        "help": "admin", "sid": "admin", "name": "admin",
+        "reset": "admin", "stop": "admin", "new": "admin",
+        "stats": "admin", "provider": "admin",
+        "dashboard_update": "admin", "set": "admin", "unset": "admin",
         # 本插件（细粒度动作由各 handler 内部再判）
         # 「私聊」= 聊天功能开关，对个人生效（id_whitelist 按 QQ 存）
         "私聊": "user", "管理员": "user", "权限": "super",
+        # 本插件：公开指令列表
+        "指令": "user",
         # ltm
         "记忆": "user", "忘记": "user",
         # dice
@@ -95,11 +99,12 @@ DEFAULT_PERM: dict = {
         "兽聚help": "user", "兽聚指令": "user", "兽聚功能": "user", "兽聚用法": "user",
         "关心": "admin", "特别关心": "admin", "关注": "admin",
         "取消关心": "admin", "不关心了": "admin", "取消关注": "admin",
-        # apimode
+        # apimode——全插件管理员可用（2026-11-20）
         "切换": "admin", "省token": "admin", "审查": "admin", "判官": "admin",
+        "额度": "admin", "思维链": "admin",
     },
     "exact": {
-        "用量": "user", "额度查询": "user",
+        "用量": "admin", "额度查询": "admin",
         # 兽聚功能开关，对群生效（furcon_enabled.json 按 group_id 存）
         "启用": "admin", "启用功能": "admin", "开启功能": "admin", "打开功能": "admin",
         "关闭": "admin", "关闭功能": "admin", "停用功能": "admin", "禁用功能": "admin",
@@ -395,8 +400,8 @@ class MyPlugin(star.Star):
             if not cmd:
                 return
 
-            # ---- access 自己的三个指令直接处理，不走 CommandFilter ----
-            if cmd in ("权限", "私聊", "管理员"):
+            # ---- access 自己的指令直接处理，不走 CommandFilter ----
+            if cmd in ("权限", "私聊", "管理员", "指令"):
                 level = self._level(event)
                 body = re.sub(r"^\s*[/／]\s*", "", (event.message_str or "")).strip()
                 rest = body[len(cmd):].strip()
@@ -409,6 +414,9 @@ class MyPlugin(star.Star):
                 # respond 阶段永不执行（踩过，2026-11-20）。send 不走 result 处理。
                 if cmd == "权限":
                     async for r in self._do_perm(event, level, action, target, lv):
+                        await event.send(r)
+                elif cmd == "指令":
+                    async for r in self._do_cmds(event):
                         await event.send(r)
                 elif cmd == "私聊":
                     async for r in self._do_private(event, level, action, target):
@@ -436,6 +444,89 @@ class MyPlugin(star.Star):
             event.stop_event()
         except Exception as exc:  # noqa: BLE001 - gate 绝不崩溃，放行让其他插件处理
             logger.warning(f"[access] gate error (pass-through): {exc}")
+
+    # ================= /指令（公开指令列表） =================
+
+    def _is_public_row(self, key: str, declared_lvl: str) -> bool:
+        """一行声明是否对所有人真的可用。
+
+        双重判定：闸门级别（权限表实际值）与声明级别都为公开才算——
+        只看声明会漏掉 handler 内部再拦的（/读图），只看闸门会漏掉
+        内部细粒度动作（/私聊 允许）。取两者更严的一档。
+        """
+        if LV_FROM_WORD.get((declared_lvl or "公开").strip(), LV_USER) != LV_USER:
+            return False
+        head = key.lstrip("/／").strip().split()[0] if key.strip() else ""
+        if not head:
+            return False
+        found = self._find_perm(head)
+        word = found[2] if found else self._perm.get("unknown_slash", "user")
+        return LV_FROM_WORD.get(word, LV_USER) == LV_USER
+
+    def _public_lines(self) -> list[str]:
+        """公开指令列表的卡面内容，按模块分类。"""
+        lines: list[str] = []
+        for short, info in sorted(self._declared.items()):
+            rows = []
+            for key, item in sorted(info["commands"].items()):
+                desc, lvl = (
+                    item if isinstance(item, tuple) else (str(item), "公开")
+                )
+                if not self._is_public_row(key, lvl):
+                    continue
+                rows.append(f"  {key} —— {desc}")
+            if rows:
+                lines.append(f"## {short}")
+                lines.extend(rows)
+                lines.append("")
+
+        # 没被声明认领的公开键：斜杠别名 + 唤醒词
+        claimed: set[str] = set()
+        for info in self._declared.values():
+            for key in info["commands"]:
+                head = key.lstrip("/／").strip().split()[0] if key.strip() else ""
+                if head:
+                    claimed.add(head)
+        alias = [
+            f"/{key}"
+            for section in ("prefix", "exact")
+            for key, word in sorted(self._perm.get(section, {}).items())
+            if key not in claimed and LV_FROM_WORD.get(word, 0) == LV_USER
+        ]
+        wake = sorted(
+            key
+            for key, word in self._perm.get("contains", {}).items()
+            if key not in claimed and LV_FROM_WORD.get(word, 0) == LV_USER
+        )
+        if alias:
+            lines.append("## 别名")
+            lines.append("  " + "  ".join(alias))
+            lines.append("")
+        if wake:
+            lines.append("## 唤醒词（不用斜杠也能触发）")
+            lines.append("  " + "、".join(wake))
+            lines.append("")
+        if not lines:
+            lines = ["（现在没有对所有人开放的指令）"]
+        return lines
+
+    async def _do_cmds(self, event: AstrMessageEvent) -> None:
+        """所有人可用的指令列表，一图流按模块分类。"""
+        try:
+            lines = self._public_lines()
+        except Exception as exc:  # noqa: BLE001 - 列表挂了给一句兜底
+            logger.warning(f"[access] public cmd list failed: {exc}")
+            await event.send(event.plain_result("指令列表生成失败了，稍后再试。"))
+            return
+        path = _render_card("指令列表·所有人可用", lines, footer="管理类指令不在此列")
+        if path is not None:
+            yield event.image_result(str(path))
+            return
+        # 绘卡不可用：降级纯文字
+        text = "指令列表（所有人可用）：\n" + "\n".join(
+            l for l in lines if not l.startswith("## ")
+        )
+        yield event.plain_result(text)
 
     # ================= /权限（指令权限表） =================
 
