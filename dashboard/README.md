@@ -69,40 +69,53 @@ python -m uvicorn app:app --port 6190
   "config":  {"available": false, "reason": "缺少 apps/AstrBot/data/cmd_config.json"},
   "botdb":   {"available": false, "reason": "缺少聊天数据库 data_v4.db"},
   "memdb":   {"available": false, "reason": "缺少记忆数据库 memory.db"},
-  "judge":   {"available": true,  "reason": ""},
-  "cores":   "..."
+  "judge":   {"available": true,  "reason": ""}
 }
 ```
 
 **双保险**：就算能力表本身拿不到（比如前端配了一个老版本后端，`/api/capabilities`
-404），每个面板的 `fetch` 也走统一的 `api()` 包装——请求失败、超时（9 秒）、或返回
-非 JSON 时，同样会把该面板置灰并写出原因。所以「没有对应接口」一定会变成「置灰」，
+404），前端还包了一层全局 `fetch`——任何请求超时（9 秒）、HTTP 错误、或返回非 JSON，
+都会自动置灰该请求对应的面板并写出原因（GET 读不到数据面板就没意义；POST 失败只
+在接口不存在时置灰，平时只显示错误消息）。所以「没有对应接口」一定会变成「置灰」，
 不会卡在「加载中…」。
+
+能力置灰（`data-caps` / `data-cap`）与模式门控（`data-only`，本地/第三方）相互独立：
+模式门控会跳过已被能力禁用的控件，两者可叠加。
 
 ## 面板 ↔ 数据来源 ↔ 能力
 
-| 面板 | 读/写什么 | 能力键 | 缺什么会置灰 |
-|---|---|---|---|
-| 系统状态 | psutil、端口探测 | `core` | 永不置灰 |
-| 手动加记忆 | `memory.db` → 写向量库 8097 | `memdb,botdb,embedding` | 缺任一 |
-| 最近记住的事 | `data/memory.db` | `memdb` | 缺库 |
-| 最近对话 | AstrBot `data_v4.db` | `botdb` | 缺库 |
-| 触发权限 / 水群 | `cmd_config.json` | `config` | 缺配置 |
-| 本地优化 / 第三方精简 | `data/reply.json` | — | 缺文件会自动创建 |
-| 记忆提取提示词 | `data/ltm_prompt.txt` | — | 缺文件会自动创建 |
-| 审查 · 额度 | `cmd_config.json` | `config` | 缺配置 |
-| 人格 | `data/persona.json` | — | 缺文件会自动创建 |
-| 判官 | `data/judge.json`；试判调 8082 | — / `judge` | 仅「试一下」按钮 |
-| 判官与思维链 | `cmd_config.json` | `config` | 缺配置 |
-| 回复行为 | `data/reply.json` | — | — |
-| 模型采样参数 | `cmd_config.json` | `config` | 缺配置 |
-| 对话上下文 | AstrBot `data_v4.db` | `botdb` | 缺库 |
-| 自动接话开关 | `cmd_config.json` + `data_v4.db` | `config,botdb` | 缺任一 |
-| 主模型 | `cmd_config.json` + `models.ini` | `models` | 缺任一 |
-| 识图 | `data/vision_mode.json`；启停 VL 调 8085 | — / `vl` | 仅启停按钮 |
-| 图片理解 | `data/caption_cache.db` | `caption` | 缺库 |
-| 已装模块 | `apps/AstrBot/data/plugins/` | `plugins` | 缺目录 |
-| 运行日志 | NapCat / AstrBot / 模型路由日志 | `logs` | 找不到日志 |
+界面按 Tab 分组（概览 / 对话 / 判官 / 记忆 / 视觉 / 系统），另有「本地 / 第三方」模式门控
+（`data-only`，由 `/api/status` 的 mode 驱动）。能力置灰与模式门控相互独立、可叠加。
+
+| Tab | 面板 | 读/写什么 | 能力键 | 缺什么会置灰 |
+|---|---|---|---|---|
+| 概览 | 当前模式与链路 | `/api/status` | — | — |
+| 概览 | 系统状态 | psutil、端口探测 | — | — |
+| 概览 | 最近记住的事 | `data/memory.db` | `memdb` | 缺库 |
+| 概览 | 最近对话 | AstrBot `data_v4.db` | `botdb` | 缺库 |
+| 对话 | 本地主模型 | `cmd_config.json` + `models.ini` | `models` | 缺任一 |
+| 对话 | 模型采样参数 | `cmd_config.json` | `config` | 缺配置 |
+| 对话 | 回复行为 | `data/reply.json` | — | 缺文件会自动创建 |
+| 对话 | 自动接话开关 | `cmd_config.json` + `data_v4.db` | `config,botdb` | 缺任一 |
+| 对话 | 触发权限 | `cmd_config.json` | `config` | 缺配置 |
+| 对话 | 冷场水群 | `data/water.json` + 群列表 | `config,botdb` | 缺任一 |
+| 判官 | 本地判官 | `data/judge.json` | — | 缺文件会自动创建 |
+| 判官 | 双判官 | `data/reply.json`（`data-only="local"`） | — | — |
+| 判官 | 思维链 | `cmd_config.json` | `config` | 缺配置 |
+| 判官 | 试判 | 调 8082 或第三方 API | 按钮 `judge` | 仅「试一下」按钮 |
+| 判官 | 第三方判官 | `data/judge.json` | — | 缺文件会自动创建 |
+| 记忆 | 长期记忆 | `memory.db` + `data_v4.db` + 向量 8097 | `memdb,botdb,embedding` | 缺任一 |
+| 记忆 | 记忆提取提示词 | `data/ltm_prompt.txt` | — | 缺文件会自动创建 |
+| 记忆 | 抽取节奏 | `data/ltm.json` | — | 缺文件会自动创建 |
+| 视觉 | 识图模式 | `data/vision_mode.json` | — | — |
+| 视觉 | 图片理解缓存 | `data/caption_cache.db` | `caption` | 缺库 |
+| 系统 | 模式与链路 | `/api/status` + `/api/mode` | — | — |
+| 系统 | 优化预设 | `data/reply.json` | — | — |
+| 系统 | 审查 · 额度 | `cmd_config.json` | `config` | 缺配置 |
+| 系统 | 对话上下文 | AstrBot `data_v4.db` | `botdb` | 缺库 |
+| 系统 | 人格 | `data/persona.json` | — | 缺文件会自动创建 |
+| 系统 | 已装模块 | `apps/AstrBot/data/plugins/` | `plugins` | 缺目录 |
+| 系统 | 运行日志 | NapCat / AstrBot / 模型路由日志 | `logs` | 找不到日志 |
 
 ## 依赖
 

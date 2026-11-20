@@ -7,12 +7,14 @@ writing the JSON config files that the plugins read.
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import os
 import re
 import socket
 import sqlite3
 import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,6 +53,7 @@ JUDGE_API_FILE = ROOT / "data" / "judge_api.json"
 WATER_FILE = ROOT / "data" / "water.json"
 AUTOREPLY_FILE = ROOT / "data" / "autoreply.json"
 REPLY_FILE = ROOT / "data" / "reply.json"
+LTM_FILE = ROOT / "data" / "ltm.json"
 PLUGIN_DIR = ROOT / "apps" / "AstrBot" / "data" / "plugins"
 JUDGE_URL = "http://127.0.0.1:8082/v1/chat/completions"
 
@@ -67,6 +70,7 @@ PORTS = {
     "judge": (8082, "判官模型"),
     "vl": (8085, "本地读图"),
     "ocr": (8083, "OCR"),
+    "embed": (8097, "向量"),
     "dash": (6190, "控制台"),
 }
 
@@ -456,20 +460,109 @@ def capability_report() -> dict:
 def capabilities() -> JSONResponse:
     """Return which optional panels this deployment can actually use."""
     return JSONResponse(capability_report())
+LTM_DEFAULTS = {
+    "enabled": True,
+    "scan_interval": 90,
+    "scan_budget": 4,
+    "user_cooldown": 300,
+    "extract_cooldown": 45,
+    "max_tokens": 500,
+    "third_party_scan": True,
+}
+
+
+def read_ltm_settings() -> dict:
+    """Return the memory-extraction rhythm with defaults filled in.
+
+    Returns:
+        Dict with enabled / scan_interval / scan_budget / user_cooldown /
+        extract_cooldown / max_tokens / third_party_scan.
+    """
+    data = read_json(LTM_FILE, {})
+    out = dict(LTM_DEFAULTS)
+    for key, default in LTM_DEFAULTS.items():
+        value = data.get(key, default)
+        if isinstance(default, bool):
+            out[key] = bool(value)
+        else:
+            try:
+                out[key] = int(value)
+            except (TypeError, ValueError):
+                out[key] = default
+    return out
+
+
+@app.get("/api/ltm/settings")
+def get_ltm_settings() -> JSONResponse:
+    """Return how often group history is mined for memories."""
+    return JSONResponse(read_ltm_settings())
+
+
+@app.post("/api/ltm/settings")
+async def save_ltm_settings(request: Request) -> JSONResponse:
+    """Save the extraction rhythm. The plugin re-reads ltm.json by mtime."""
+    body = await request.json()
+    current = read_json(LTM_FILE, {})
+    limits = {
+        "scan_interval": (30, 3600),
+        "scan_budget": (1, 20),
+        "user_cooldown": (0, 86400),
+        "extract_cooldown": (0, 3600),
+        "max_tokens": (100, 2000),
+    }
+    for key, (low, high) in limits.items():
+        if key not in body:
+            continue
+        try:
+            value = int(body[key])
+        except (TypeError, ValueError):
+            return JSONResponse({"ok": False, "msg": f"{key} 不是数字"})
+        current[key] = max(low, min(high, value))
+    for key in ("enabled", "third_party_scan"):
+        if key in body:
+            current[key] = bool(body[key])
+    write_json(LTM_FILE, current)
+    return JSONResponse({"ok": True, "msg": "已保存，下一轮扫描生效（无需重启）"})
 
 
 @app.get("/api/status")
 def status() -> JSONResponse:
-    """Return component health plus small counters."""
+    """Return component health plus the mode snapshot."""
     comps = [
         {"key": key, "label": label, "port": port, "up": port_open(port)}
         for key, (port, label) in PORTS.items()
     ]
+    mode = api_mode()
+    model_name = ""
+    judge_model = ""
+    try:
+        cfg = json.loads(CFG.read_text(encoding="utf-8-sig"))
+        model_name = str(active_provider(cfg).get("model") or "")
+        for provider in cfg.get("provider", []):
+            if provider.get("id") == "local-llama":
+                judge_model = str(provider.get("model") or "")
+                break
+    except (json.JSONDecodeError, OSError):
+        pass
     return JSONResponse(
         {
             "components": comps,
             "memories": memory_total(),
             "activity": recent_activity(),
+            "mode": mode,
+            "model": model_name,
+            "judge_model": judge_model,
+            "vision": read_vision_state().get("mode"),
+            "ltm": read_ltm_settings(),
+            "reply": {
+                "history_minutes": float(read_json(REPLY_FILE, {}).get("history_minutes", 20)),
+                "history_min_count": int(
+                    read_json(REPLY_FILE, {}).get("history_min_count", 3)
+                ),
+                "history_fallback_count": int(
+                    read_json(REPLY_FILE, {}).get("history_fallback_count", 12)
+                ),
+            },
         }
     )
 
@@ -735,6 +828,8 @@ def get_reply() -> JSONResponse:
             "meme_chance": float(data.get("meme_chance", 0.3)),
             "reply_chance": float(data.get("reply_chance", 1.0)),
             "history_minutes": float(data.get("history_minutes", 30)),
+            "history_min_count": int(data.get("history_min_count", 3)),
+            "history_fallback_count": int(data.get("history_fallback_count", 12)),
             "reply_budget": int(data.get("reply_budget", 8)),
             "reply_budget_minutes": float(data.get("reply_budget_minutes", 10)),
             "summon": read_json(JUDGE_FILE, {}).get("summon", []),
@@ -780,7 +875,22 @@ async def save_reply(request: Request) -> JSONResponse:
     current["meme_chance"] = chance
     current["reply_chance"] = reply_chance
     if "history_minutes" in body:
-        current["history_minutes"] = float(body["history_minutes"])
+        current["history_minutes"] = max(1.0, min(240.0, float(body["history_minutes"])))
+    if "history_min_count" in body:
+        try:
+            low = int(body["history_min_count"])
+        except (TypeError, ValueError):
+            return JSONResponse({"ok": False, "msg": "最少条数不是整数"})
+        current["history_min_count"] = max(1, min(20, low))
+    if "history_fallback_count" in body:
+        try:
+            fallback = int(body["history_fallback_count"])
+        except (TypeError, ValueError):
+            return JSONResponse({"ok": False, "msg": "兜底条数不是整数"})
+        current["history_fallback_count"] = max(1, min(40, fallback))
+    # 兜底条数不能比阈值还少，否则等于没补
+    if current.get("history_fallback_count", 12) < current.get("history_min_count", 3):
+        current["history_fallback_count"] = current["history_min_count"]
     if "reply_budget" in body:
         current["reply_budget"] = int(body["reply_budget"])
     if "reply_budget_minutes" in body:
@@ -789,6 +899,8 @@ async def save_reply(request: Request) -> JSONResponse:
     if rules or body.get("clear_rules"):
         current["text_rules"] = rules
     current.setdefault("history_minutes", 30)
+    current.setdefault("history_min_count", 3)
+    current.setdefault("history_fallback_count", 12)
     current.setdefault("reply_budget", 8)
     current.setdefault("reply_budget_minutes", 10)
     current.setdefault("text_rules", [{"pattern": "。(?=\\s|$)", "to": "~"}])
@@ -1685,6 +1797,81 @@ async def test_judge(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "msg": f"判官没响应（8082）：{exc}"})
     return JSONResponse(
         {"verdict": verdict[:4], "source": "模型判定", "ms": int((time.time() - started) * 1000)}
+    )
+
+
+_APIMODE_MODULE = None
+
+
+def apimode_module():
+    """Load the apimode plugin as a plain module.
+
+    The plugin already owns every side effect of a mode switch (provider flags,
+    vision mode, unloading the local models, restart). Importing it keeps one
+    implementation instead of a drifting copy in the dashboard.
+
+    Returns:
+        The imported module object.
+
+    Raises:
+        Exception: When the module cannot be imported.
+    """
+    global _APIMODE_MODULE
+    if _APIMODE_MODULE is not None:
+        return _APIMODE_MODULE
+    astrbot_root = str(ROOT / "apps" / "AstrBot")
+    if astrbot_root not in sys.path:
+        sys.path.insert(0, astrbot_root)
+    path = PLUGIN_DIR / "astrbot_plugin_apimode" / "main.py"
+    spec = importlib.util.spec_from_file_location("_dash_apimode", path)
+    if spec is None or spec.loader is None:
+        raise RuntimeError(f"无法加载 {path}")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    _APIMODE_MODULE = module
+    return module
+
+
+@app.post("/api/mode")
+async def switch_mode(request: Request) -> JSONResponse:
+    """Switch the whole bot between the local model and the third-party API."""
+    body = await request.json()
+    mode = str(body.get("mode", "")).strip()
+    if mode not in ("local", "third_party"):
+        return JSONResponse({"ok": False, "msg": "mode 只能是 local / third_party"})
+    if api_mode() == mode:
+        return JSONResponse({"ok": True, "msg": "已经是这个模式了"})
+    try:
+        mod = apimode_module()
+    except Exception as exc:  # noqa: BLE001 - surface the failure in the UI
+        return JSONResponse({"ok": False, "msg": f"切换模块加载失败：{exc}"})
+    try:
+        mod.set_provider_mode(mode)
+        mod.tune_reply_for_mode(mode)
+        if mode == "third_party":
+            mod.set_thinking("off")
+            mod.set_vision_mode("third_party")
+            stopped = mod.unload_local_models()
+            detail = f"已卸载本地服务 {len(stopped)} 个"
+        else:
+            mod.tune_local_provider()
+            mod.set_vision_mode("local")
+            mod.start_local_models()
+            detail = "本地模型启动中（约 1 分钟）"
+        state = mod.load_state()
+        state["mode"] = mode
+        mod.save_state(state)
+        mod.schedule_restart(8)
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"ok": False, "msg": f"切换失败：{exc}"})
+    return JSONResponse(
+        {
+            "ok": True,
+            "msg": (
+                f"已切到{'第三方 API' if mode == 'third_party' else '本地模型'}，"
+                f"{detail}；8 秒后 AstrBot 重启（QQ 不断线）"
+            ),
+        }
     )
 
 
