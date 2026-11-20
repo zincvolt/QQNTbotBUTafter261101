@@ -68,12 +68,17 @@
 1. 装 AstrBot **4.29.4** 到 `apps\AstrBot`（独立 venv）。
 2. **关键**：本仓库的 `apps\AstrBot\astrbot\` 是**改过的核心源码**（含 6 处补丁），
    必须用本仓库的版本**覆盖**掉发行版里的同名目录，否则补丁全丢、功能悄悄失效。
-3. 把本仓库的自研插件复制到 `apps\AstrBot\data\plugins\`：
+3. 装自研插件：克隆各插件独立仓库到 `apps\AstrBot\data\plugins\`（插件清单与链接见根目录 README「写了一些插件」表；插件不再存放在本仓库）：
    ```
-   astrbot_plugin_peer/  astrbot_plugin_ltm/  astrbot_plugin_vision_context/
-   astrbot_plugin_websearch/  astrbot_plugin_meme_manager/  ...
+   git clone https://github.com/zincvolt/astrbot-plugin-access     astrbot_plugin_access
+   git clone https://github.com/zincvolt/astrbot-plugin-peer       astrbot_plugin_peer
+   git clone https://github.com/zincvolt/astrbot-plugin-ltm        astrbot_plugin_ltm
+   git clone https://github.com/zincvolt/astrbot-plugin-vision_context  astrbot_plugin_vision_context
+   git clone https://github.com/zincvolt/astrbot-plugin-websearch  astrbot_plugin_websearch
+   git clone https://github.com/zincvolt/astrbot-plugin-meme_manager  astrbot_plugin_meme_manager
+   ...（其余插件同法）
    ```
-   （GitHub 仓里插件目录结构若与发行版不同，以发行版 `data/plugins/` 为准放置。）
+   注意目录名要带 `astrbot_plugin_` 前缀；权限闸门 access 建议最先装，其余插件靠它做统一鉴权与指令声明。
 4. 面板默认账号：`astrbot` / `qqbot2026`（改配置后以你的为准）。
 
 ### 步骤 3：准备模型服务

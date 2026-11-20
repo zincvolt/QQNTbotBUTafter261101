@@ -1,4 +1,0 @@
-name: astrbot_plugin_access
-desc: 权限闸门（/权限 /私聊 /管理员 /指令）：统一斜线指令鉴权、指令权限表在线编辑、主动回复冲突仲裁，替代各插件 maxsize 力大砖飞。新插件接入权限管理看本目录 COMMAND-GUIDE.md（指令管理指南），部署新插件看 DEPLOY-GUIDE.md（部署指南）
-author: local
-version: 2.0.0

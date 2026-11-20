@@ -14,16 +14,18 @@
 | 插件 | 用途 |
 |---|---|
 | [astrbot-plugin-peer](https://github.com/zincvolt/astrbot-plugin-peer) | 核心人格与发言闸门：像群友一样聊天、答不上来就装死、低频水群、表情后处理 |
+| [astrbot-plugin-access](https://github.com/zincvolt/astrbot-plugin-access) | 权限闸门：统一斜线指令鉴权、指令权限表在线编辑、主动回复冲突仲裁（附新插件指令管理/部署双指南） |
 | [astrbot-plugin-ltm](https://github.com/zincvolt/astrbot-plugin-ltm) | 长期记忆：抽取稳定事实、语义召回后注入提示词 |
 | [astrbot-plugin-apimode](https://github.com/zincvolt/astrbot-plugin-apimode) | 本地 / 第三方模型热切换、token 额度、按群审查 |
 | [astrbot-plugin-visionmode](https://github.com/zincvolt/astrbot-plugin-visionmode) | 读图方式切换：本地 VL / 第三方 / 关 |
-| [astrbot-plugin-vision-context](https://github.com/zincvolt/astrbot-plugin-vision-context) | 群图上下文：后台给图片生成释义并缓存，回复时按需注入 |
+| [astrbot-plugin-vision_context](https://github.com/zincvolt/astrbot-plugin-vision_context) | 群图上下文：后台给图片生成释义并缓存，回复时按需注入 |
 | [astrbot-plugin-websearch](https://github.com/zincvolt/astrbot-plugin-websearch) | 联网搜索：接本地 SearXNG，自动 + 工具两种入口 |
 | [astrbot-plugin-furcon](https://github.com/zincvolt/astrbot-plugin-furcon) | 兽聚倒计时、每日运势、群统计，图片卡片输出 |
 | [astrbot-plugin-repeat](https://github.com/zincvolt/astrbot-plugin-repeat) | 群聊复读机：三条以上相同消息自动复读一次，带冷却与去重 |
+| [astrbot-plugin-dice](https://github.com/zincvolt/astrbot-plugin-dice) | 桌游骰娘：/r 1d20、/r 2d6+3、/r 4d6kh3，只输出随机数 |
+| [astrbot-plugin-meme_manager](https://github.com/zincvolt/astrbot-plugin-meme_manager) | 表情包管理（fork 自 [anka-afk](https://github.com/anka-afk/astrbot_plugin_meme_manager)）：WebUI 图库管理、AI 智能发送、自动收集 |
 
-> 这些插件在本主仓库的 `apps/AstrBot/data/plugins/` 下也各留了一份，方便整体部署；独立仓库便于单独阅读和复用。
-> 表情包管理用的是第三方插件 [anka-afk/astrbot_plugin_meme_manager](https://github.com/anka-afk/astrbot_plugin_meme_manager)
+> 插件都放在各自的独立仓库里（每个插件 main.py 的 metadata 描述里也带主仓库链接），本仓库只保留框架与自研适配器。装插件时把对应仓库放进 AstrBot 的 `data/plugins/` 目录即可；权限闸门 [astrbot-plugin-access](https://github.com/zincvolt/astrbot-plugin-access) 建议最先装，其余插件靠它做统一鉴权。
 
 ## 依赖的上游项目
 

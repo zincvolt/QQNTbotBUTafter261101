@@ -1,7 +1,0 @@
-{
-  "super_admins": {
-    "description": "最高管理员 QQ 号列表（可管理管理员与私聊白名单，改动即时生效）",
-    "type": "list",
-    "default": ["1154487120"]
-  }
-}
