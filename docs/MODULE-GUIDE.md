@@ -103,6 +103,8 @@ async def cmd(self, event: AstrMessageEvent):
 
 **每个插件必须在 `main.py` 顶层声明自己的指令清单。** 这是插件加入统一权限管理（access 闸门）的前提：`/权限 列表` 的按插件分组图卡就是从这里自动读取的（ast 解析字面量，不执行插件代码）。
 
+> 完整配套文档在权限插件目录内：指令管理指南 `apps/AstrBot/data/plugins/astrbot_plugin_access/COMMAND-GUIDE.md`，新插件部署指南同目录 `DEPLOY-GUIDE.md`。
+
 ### 有斜线指令的插件
 
 ```python
