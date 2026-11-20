@@ -25,12 +25,23 @@ from astrbot.api.event import AstrMessageEvent, filter
 ROOT = Path(r"D:\QQNTBOT")
 STATE = ROOT / "data" / "vision_mode.json"
 
-# 权限归 access 统一管理，不再自留 ADMINS 名单
+# 权限：优先用 access 统一判定，单拎时自动降级为本地名单（也能用）
 sys.path.insert(0, str(ROOT / "apps" / "AstrBot" / "data" / "plugins" / "astrbot_plugin_access"))
 try:
     from unified_perm import is_admin as _unified_is_admin
-except ImportError:  # access 插件不在时安全降级：一律拒绝管理操作
-    _unified_is_admin = lambda e: False  # noqa: E731
+except ImportError:
+    _STANDALONE_ADMINS = {"1154487120"}
+    def _unified_is_admin(event):  # noqa: F811
+        uid = str(event.get_sender_id() or "")
+        return uid in _STANDALONE_ADMINS or getattr(event, "role", "") == "admin"
+
+# 本插件自声明指令（单拎时帮助/权限表自动读这里）
+DECLARED_COMMANDS = {
+    "/读图": ("看当前读图模式", "管理"),
+    "/读图 本地": ("图先本地 VL 转文字", "管理"),
+    "/读图 第三方": ("图片直接发 DeepSeek", "管理"),
+    "/读图 关": ("忽略图片", "管理"),
+}
 
 
 def load_vision_state() -> dict:

@@ -37,12 +37,27 @@ CONFIG = ROOT / "apps" / "AstrBot" / "data" / "cmd_config.json"
 REPLY = ROOT / "data" / "reply.json"
 WORDS = ROOT / "data" / "review_words.txt"
 
-# 权限归 access 统一管理，不再自留 ADMINS 名单
-sys.path.insert(0, str(ROOT / "apps" / "AstrBot" / "data" / "plugins" / "astrbot_plugin_access"))
+# 权限：优先用 access 统一判定，单拎时自动降级为本地名单（也能用）
+sys.path.insert(0, str(Path(__file__).parent.parent / "astrbot_plugin_access"))
 try:
     from unified_perm import is_admin as _unified_is_admin
-except ImportError:  # access 插件不在时安全降级：一律拒绝管理操作
-    _unified_is_admin = lambda e: False  # noqa: E731
+except ImportError:
+    _STANDALONE_ADMINS = {"1154487120"}
+    def _unified_is_admin(event):  # noqa: F811
+        uid = str(event.get_sender_id() or "")
+        return uid in _STANDALONE_ADMINS or getattr(event, "role", "") == "admin"
+
+# 本插件自声明指令（单拎时帮助/权限表自动读这里）
+DECLARED_COMMANDS = {
+    "/切换 api 本地|第三方": ("切换本地/第三方模型", "管理"),
+    "/额度 <数字>": ("设每日 token 上限", "管理"),
+    "/省token on|off": ("省 token 模式", "管理"),
+    "/审查 on|off": ("本群内容审查开关", "管理"),
+    "/思维链 off|on|low|high|max": ("第三方思维链强度", "管理"),
+    "/判官 状态|开关|预算|概率|限额": ("第三方判官配置", "管理"),
+    "/用量": ("看模式/用量/额度", "公开"),
+    "/额度查询": ("同 /用量", "公开"),
+}
 
 DEFAULT_WORDS = [
     "习近平", "共产党", "台独", "六四", "天安门事件", "法轮功",

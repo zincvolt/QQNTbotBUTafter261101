@@ -114,14 +114,32 @@ FONT_CANDIDATES += [
 # Bot names that trigger "call by name" mode (env-overridable).
 NAME_CALL = os.environ.get("FURCON_NAME_CALL", r"(阿灰|小灰|灰狼)")
 
-# 权限归 access 统一管理，不再自留 ADMINS 名单（FURCON_ADMINS 仍被 access 兼容读取）
+# 权限：优先用 access 统一判定，单拎时自动降级为本地名单（也能用）
 sys.path.insert(0, str(ROOT / "apps" / "AstrBot" / "data" / "plugins" / "astrbot_plugin_access"))
 try:
     from unified_perm import admin_qqs as _admin_qqs
     from unified_perm import is_admin as _unified_is_admin
-except ImportError:  # access 插件不在时安全降级：一律拒绝管理操作
-    _unified_is_admin = lambda e: False  # noqa: E731
-    _admin_qqs = lambda: []  # noqa: E731
+except ImportError:
+    # 单拎模式：环境变量或默认名单
+    _admins_raw = os.environ.get("FURCON_ADMINS", "1154487120")
+    _STANDALONE_ADMINS = {x.strip() for x in re.split(r"[,\s]+", _admins_raw) if x.strip()}
+    def _unified_is_admin(event):  # noqa: F811
+        uid = str(event.get_sender_id() or "")
+        return uid in _STANDALONE_ADMINS or getattr(event, "role", "") == "admin"
+    def _admin_qqs():  # noqa: F811
+        return sorted(_STANDALONE_ADMINS)
+
+# 本插件自声明指令（单拎时帮助/权限表自动读这里）
+DECLARED_COMMANDS = {
+    "/下次展 /近期展 /<城市>下次展 /<城市>近期展": ("兽展倒计时/列表卡", "公开"),
+    "/兽聚help /兽聚指令 /兽聚功能 /兽聚用法": ("兽聚帮助", "公开"),
+    "/运势 /人品 /jrrp /jrys": ("今日人品卡", "公开"),
+    "/群统计 /谁最活跃 /水群榜": ("近 7 天发言榜", "公开"),
+    "/启用 /启用功能 /开启功能 /打开功能": ("开启本群兽聚功能（对群）", "管理"),
+    "/关闭 /关闭功能 /停用功能 /禁用功能": ("关闭本群兽聚功能（对群）", "管理"),
+    "/关心 <展会名> [HH:MM]": ("设特别关心播报", "管理"),
+    "/取消关心 /不关心了 /取消关注": ("关掉播报", "管理"),
+}
 
 # Commands with their own syntax are checked before the compositional event
 # matcher.  Keeping them separate stops e.g. "/关心 苏州小聚" (which contains
@@ -928,6 +946,12 @@ HELP_TEXT = """可用指令（所有人可用，需本群已启用）
 
 也可以直接喊「阿灰 下次展」「小灰 运势」"""
 
+# 一图流帮助卡：优先用 access 的 card_render，单拎时降级 PIL 自绘
+try:
+    from card_render import render_text_card as _render_card
+except ImportError:
+    _render_card = None
+
 
 def group_enabled(group_id: str) -> bool:
     """Return whether the feature set is enabled for one group."""
@@ -1121,7 +1145,16 @@ class Main(star.Star):
                 return
 
             if key == "help":
-                await event.send(event.plain_result(HELP_TEXT))
+                if _render_card:
+                    # 一图流帮助卡（SHA 缓存，内容没变不重画）
+                    card_path = _render_card(
+                        "兽聚指令帮助",
+                        HELP_TEXT.split("\n"),
+                        footer="也可喊「阿灰 下次展」「小灰 运势」",
+                    )
+                    await event.send(event.image_result(str(card_path)))
+                else:
+                    await event.send(event.plain_result(HELP_TEXT))
                 event.stop_event()
                 return
 

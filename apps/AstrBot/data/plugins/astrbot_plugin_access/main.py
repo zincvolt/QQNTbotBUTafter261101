@@ -52,6 +52,19 @@ _CMD_LISTENER_MODS = (
     "astrbot_plugin_apimode",
 )
 
+# 本插件自声明指令（单拎时帮助/权限表自动读这里）
+DECLARED_COMMANDS = {
+    "/权限 列表": ("看全部指令和级别", "公开"),
+    "/权限 检查 <指令>": ("看某指令当前级别", "超管"),
+    "/权限 设置 <指令> <级别>": ("改指令级别", "超管"),
+    "/权限 重置 <指令>": ("恢复默认级别", "超管"),
+    "/私聊 列表": ("看白名单（对个人）", "公开"),
+    "/私聊 允许/拒绝 <QQ号>": ("聊天功能开关（对个人）", "管理"),
+    "/私聊 检查开/检查关": ("白名单检查总闸", "管理"),
+    "/管理员 列表": ("看管理员名单", "超管"),
+    "/管理员 添加/移除 <QQ号>": ("管管管理员名单", "超管"),
+}
+
 # ---------- 指令权限表默认值 ----------
 # prefix=前缀匹配（带参数指令）; exact=全等（短/泛用词防误伤）; contains=包含
 # （仅唤醒时判定，全部为公开级，误命中无害）。级别一律以表为准，可在线改。
@@ -106,32 +119,37 @@ DENY_TEXT = {
     LV_SUPER: "这个指令只有我的最高管理员能用。",
 }
 
-PRIV_HELP = (
-    "私聊权限指令（管理员可用）：\n"
-    "/私聊 列表 —— 看当前白名单\n"
-    "/私聊 允许 <QQ号> —— 允许对方私聊我\n"
-    "/私聊 拒绝 <QQ号> —— 取消对方私聊权限\n"
-    "/私聊 检查开 / 检查关 —— 开关白名单检查\n"
-    "（管理员本人本来就能私聊我）"
-)
+# ---------- 一图流绘卡（长输出用图，短确认仍用文字） ----------
+sys.path.insert(0, str(Path(__file__).parent))
+from card_render import render_text_card  # noqa: E402
 
-ADMIN_HELP = (
-    "管理员指令（仅最高管理员可用）：\n"
-    "/管理员 列表 —— 看管理员名单\n"
-    "/管理员 添加 <QQ号> —— 提升为管理员\n"
-    "/管理员 移除 <QQ号> —— 撤掉管理员\n"
-    "/管理员 <QQ号> —— 等价于 添加\n"
-    "最高管理员名单在 WebUI 插件配置里改"
-)
+PRIV_HELP_LINES = [
+    "## 聊天功能开关（对个人）",
+    "/私聊 列表 —— 看当前白名单",
+    "/私聊 允许 <QQ号> —— 允许对方私聊我",
+    "/私聊 拒绝 <QQ号> —— 取消对方私聊权限",
+    "/私聊 检查开 / 检查关 —— 开关白名单检查",
+    "> 管理员本人本来就能私聊我",
+    "> 存储在 id_whitelist（按 QQ 号），与兽聚开关（对群）分开管理",
+]
 
-PERM_HELP = (
-    "指令权限表（仅最高管理员可改）：\n"
-    "/权限 列表 —— 看全部指令和级别\n"
-    "/权限 检查 <指令> —— 看某指令当前级别\n"
-    "/权限 设置 <指令> <公开|管理|超管> —— 改级别\n"
-    "/权限 重置 <指令> —— 恢复默认\n"
-    "级别：公开=谁都能用 管理=管理员 超管=只有最高管理员"
-)
+ADMIN_HELP_LINES = [
+    "## 管理员名单（仅最高管理员）",
+    "/管理员 列表 —— 看管理员名单",
+    "/管理员 添加 <QQ号> —— 提升为管理员",
+    "/管理员 移除 <QQ号> —— 撤掉管理员",
+    "/管理员 <QQ号> —— 等价于 添加",
+    "> 最高管理员名单在 WebUI 插件配置里改",
+]
+
+PERM_HELP_LINES = [
+    "## 指令权限表（仅最高管理员可改）",
+    "/权限 列表 —— 看全部指令和级别",
+    "/权限 检查 <指令> —— 看某指令当前级别",
+    "/权限 设置 <指令> <公开|管理|超管> —— 改级别",
+    "/权限 重置 <指令> —— 恢复默认",
+    "级别：公开=谁都能用 管理=管理员 超管=只有最高管理员",
+]
 
 
 def _norm_qq(qq: str) -> str:
@@ -380,10 +398,10 @@ class MyPlugin(star.Star):
         lv = (lv or "").strip()
 
         if not action or action in ("帮助", "help"):
-            yield event.plain_result(PERM_HELP)
+            yield event.image_result(str(render_text_card("权限指令帮助", PERM_HELP_LINES)))
             return
         if action == "列表":
-            yield event.plain_result(self._perm_text())
+            yield event.image_result(str(self._perm_card()))
             return
         if level < LV_SUPER:
             yield event.plain_result("这个指令只有我的最高管理员能用。")
@@ -442,7 +460,7 @@ class MyPlugin(star.Star):
             yield event.plain_result(f"{target} 已恢复默认级别。")
             return
 
-        yield event.plain_result(PERM_HELP)
+        yield event.image_result(str(render_text_card("权限指令帮助", PERM_HELP_LINES)))
 
     def _find_perm(self, name: str) -> tuple[str, str, str] | None:
         """定位指令在表里的 (section, key, word)，三个区都找。"""
@@ -451,24 +469,29 @@ class MyPlugin(star.Star):
                 return section, name, self._perm[section][name]
         return None
 
-    def _perm_text(self) -> str:
-        lines = []
-        for section, title in (
-            ("prefix", "带参数指令"),
-            ("exact", "固定指令"),
-            ("contains", "包含词（唤醒时）"),
-        ):
-            entries = self._perm.get(section, {})
-            if not entries:
-                continue
-            lines.append(f"【{title}】")
-            for key in sorted(entries, key=lambda k: (LV_FROM_WORD.get(entries[k], 0), k)):
-                word = entries[key]
-                lines.append(
-                    f"  {key} → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), word)}"
-                )
-        lines.append(f"未知斜线指令 → {LV_LABEL.get(LV_FROM_WORD.get(self._perm.get('unknown_slash', 'user'), 0), '公开')}")
-        return "指令权限表：\n" + "\n".join(lines)
+    def _perm_card(self) -> Path:
+        """全量指令权限表渲染成一图流卡片。"""
+        lines = ["## 带参数指令"]
+        entries = self._perm.get("prefix", {})
+        for key in sorted(entries, key=lambda k: (LV_FROM_WORD.get(entries[k], 0), k)):
+            word = entries[key]
+            lines.append(f"  {key} → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), word)}")
+        lines.append("")
+        lines.append("## 固定指令")
+        entries = self._perm.get("exact", {})
+        for key in sorted(entries, key=lambda k: (LV_FROM_WORD.get(entries[k], 0), k)):
+            word = entries[key]
+            lines.append(f"  {key} → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), word)}")
+        lines.append("")
+        lines.append("## 包含词（唤醒时）")
+        entries = self._perm.get("contains", {})
+        for key in sorted(entries, key=lambda k: (LV_FROM_WORD.get(entries[k], 0), k)):
+            word = entries[key]
+            lines.append(f"  {key} → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), word)}")
+        lines.append("")
+        word = self._perm.get("unknown_slash", "user")
+        lines.append(f"未知斜线指令 → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), '公开')}")
+        return render_text_card("指令权限表", lines, footer="可在线改：/权限 设置 <指令> <级别>")
 
     # ================= /私聊（白名单） =================
 
@@ -482,7 +505,7 @@ class MyPlugin(star.Star):
         target = _norm_qq(target)
 
         if not action or action in ("帮助", "help"):
-            yield event.plain_result(PRIV_HELP)
+            yield event.image_result(str(render_text_card("私聊权限帮助", PRIV_HELP_LINES)))
             return
         if action == "列表":
             yield event.plain_result(self._wl_text())
@@ -541,7 +564,7 @@ class MyPlugin(star.Star):
             )
             return
 
-        yield event.plain_result(PRIV_HELP)
+        yield event.image_result(str(render_text_card("私聊权限帮助", PRIV_HELP_LINES)))
 
     def _wl_text(self) -> str:
         try:
@@ -572,7 +595,7 @@ class MyPlugin(star.Star):
         target = _norm_qq(target)
 
         if not action or action in ("帮助", "help"):
-            yield event.plain_result(ADMIN_HELP)
+            yield event.image_result(str(render_text_card("管理员帮助", ADMIN_HELP_LINES)))
             return
         if level < LV_SUPER:
             yield event.plain_result("这个指令只有我的最高管理员能用。")
@@ -624,4 +647,4 @@ class MyPlugin(star.Star):
             yield event.plain_result(f"{target} 的管理员撤掉了。")
             return
 
-        yield event.plain_result(ADMIN_HELP)
+        yield event.image_result(str(render_text_card("管理员帮助", ADMIN_HELP_LINES)))
