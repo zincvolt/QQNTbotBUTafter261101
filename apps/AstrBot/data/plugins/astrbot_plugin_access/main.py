@@ -18,6 +18,7 @@ from __future__ import annotations
 # 配置读取用 self.context.get_config()（Context 没有 astrbot_config 属性，
 # 第一版就栽在这里，测试桩 mock 了错的属性没测出来）。
 
+import ast
 import json
 import os
 import re
@@ -163,7 +164,8 @@ ADMIN_HELP_LINES = [
 
 PERM_HELP_LINES = [
     "## 指令权限表（仅最高管理员可改）",
-    "/权限 列表 —— 看全部指令和级别",
+    "/权限 列表 —— 按插件分组看全部指令",
+    "/权限 列表 <插件名> —— 只看某个插件",
     "/权限 检查 <指令> —— 看某指令当前级别",
     "/权限 设置 <指令> <公开|管理|超管> —— 改级别",
     "/权限 重置 <指令> —— 恢复默认",
@@ -189,6 +191,7 @@ class MyPlugin(star.Star):
         super().__init__(context, config=config)
         self.config = config
         self._perm: dict = self._load_perm()
+        self._declared: dict = self._load_declared()
         # 热加载/启动都跑一遍分档；on_astrbot_loaded 时全插件就位再终跑
         self._enforce_bands()
 
@@ -449,7 +452,7 @@ class MyPlugin(star.Star):
             return
         if action == "列表":
             try:
-                yield event.image_result(str(self._perm_card()))
+                yield event.image_result(str(self._perm_card(target)))
             except Exception:  # noqa: BLE001 - 绘卡失败降级文字
                 yield event.plain_result(self._perm_text_fallback())
             return
@@ -538,29 +541,101 @@ class MyPlugin(star.Star):
         lines.append(f"未知斜线指令 → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), '公开')}")
         return "指令权限表：\n" + "\n".join(lines)
 
-    def _perm_card(self) -> Path:
-        """全量指令权限表渲染成一图流卡片。"""
-        lines = ["## 带参数指令"]
-        entries = self._perm.get("prefix", {})
-        for key in sorted(entries, key=lambda k: (LV_FROM_WORD.get(entries[k], 0), k)):
-            word = entries[key]
-            lines.append(f"  {key} → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), word)}")
-        lines.append("")
-        lines.append("## 固定指令")
-        entries = self._perm.get("exact", {})
-        for key in sorted(entries, key=lambda k: (LV_FROM_WORD.get(entries[k], 0), k)):
-            word = entries[key]
-            lines.append(f"  {key} → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), word)}")
-        lines.append("")
-        lines.append("## 包含词（唤醒时）")
-        entries = self._perm.get("contains", {})
-        for key in sorted(entries, key=lambda k: (LV_FROM_WORD.get(entries[k], 0), k)):
-            word = entries[key]
-            lines.append(f"  {key} → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), word)}")
-        lines.append("")
-        word = self._perm.get("unknown_slash", "user")
-        lines.append(f"未知斜线指令 → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), '公开')}")
-        return _render_card("指令权限表", lines, footer="可在线改：/权限 设置 <指令> <级别>")
+    def _load_declared(self) -> dict[str, dict]:
+        """扫描全部插件目录，ast 提取 DECLARED_COMMANDS / DECLARED_BEHAVIOR。
+
+        ast.literal_eval 只取字面量、不执行插件代码；解析失败的插件跳过。
+        返回 {短名: {"commands": {...}, "behavior": str, "declared": bool}}。
+        """
+        out: dict[str, dict] = {}
+        plugins_dir = Path(__file__).parent.parent
+        for d in sorted(plugins_dir.iterdir()):
+            if not d.is_dir():
+                continue
+            main_py = d / "main.py"
+            if not main_py.exists():
+                continue
+            info = {"commands": {}, "behavior": "", "declared": False}
+            try:
+                tree = ast.parse(main_py.read_text(encoding="utf-8", errors="ignore"))
+            except Exception:  # noqa: BLE001 - 语法坏文件不影响其余插件
+                continue
+            for node in tree.body:
+                # 兼容两种赋值：DECLARED_X = ...（Assign）与
+                # DECLARED_X: dict[...] = ...（AnnAssign，带类型注解）
+                if isinstance(node, ast.Assign):
+                    tgt = node.targets[0] if node.targets else None
+                elif isinstance(node, ast.AnnAssign):
+                    tgt = node.target
+                else:
+                    continue
+                if not (isinstance(tgt, ast.Name)
+                        and tgt.id in ("DECLARED_COMMANDS", "DECLARED_BEHAVIOR")):
+                    continue
+                try:
+                    val = ast.literal_eval(node.value)
+                except Exception:  # noqa: BLE001
+                    continue
+                info["declared"] = True
+                if tgt.id == "DECLARED_COMMANDS" and isinstance(val, dict):
+                    info["commands"] = val
+                elif tgt.id == "DECLARED_BEHAVIOR" and isinstance(val, str):
+                    info["behavior"] = val
+            out[d.name.replace("astrbot_plugin_", "")] = info
+        return out
+
+    def _perm_card(self, only: str = "") -> Path:
+        """指令权限表按插件分组渲染成一图流；only 非空只看该插件。"""
+        lines: list[str] = []
+        only_n = (only or "").replace("astrbot_plugin_", "").strip().lower()
+
+        # 声明键的指令头（去斜杠第一段），用于识别权限表里「无归属」的指令
+        claimed_heads: set[str] = set()
+        missing: list[str] = []
+        for short, info in sorted(self._declared.items()):
+            if only_n and only_n != short.lower():
+                continue
+            cmds = info["commands"]
+            if not cmds and not info.get("behavior"):
+                missing.append(short)
+                continue
+            lines.append(f"## {short}")
+            if cmds:
+                for key, item in sorted(cmds.items()):
+                    desc, lvl = (item if isinstance(item, tuple) else (str(item), "公开"))
+                    claimed_heads.add(key.lstrip("/／").split()[0] if key.lstrip("/／") else "")
+                    lines.append(f"  {key} —— {desc} [{lvl}]")
+            else:
+                lines.append(f"  （无斜线指令）{info['behavior']}")
+            lines.append("")
+
+        if not only_n:
+            # 权限表里有、但没有任何插件声明的指令 → 归「内置/未分组」
+            ungrouped: list[tuple[str, str]] = []
+            for section in ("prefix", "exact", "contains"):
+                for key, word in self._perm.get(section, {}).items():
+                    if key not in claimed_heads:
+                        ungrouped.append(
+                            (key, LV_LABEL.get(LV_FROM_WORD.get(word, 0), word))
+                        )
+            if ungrouped:
+                lines.append("## 内置指令与别名")
+                for key, label in sorted(ungrouped):
+                    lines.append(f"  /{key} [{label}]")
+                lines.append("")
+            if missing:
+                lines.append("## ⚠ 未声明指令（不符合插件规范）")
+                lines.append("  " + "、".join(missing))
+                lines.append("")
+            word = self._perm.get("unknown_slash", "user")
+            lines.append(
+                f"未知斜线指令默认 → {LV_LABEL.get(LV_FROM_WORD.get(word, 0), '公开')}"
+            )
+        return _render_card(
+            "指令权限表·按插件" + (f"·{only_n}" if only_n else ""),
+            lines,
+            footer="只看单个插件：/权限 列表 <插件名>",
+        )
 
     # ================= /私聊（白名单） =================
 

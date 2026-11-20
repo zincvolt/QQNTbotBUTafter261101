@@ -52,6 +52,12 @@ def _detect_root() -> Path:
     return here.parents[4] if len(here.parents) > 4 else here.parent
 
 
+# 指令自声明：/权限 列表 按插件分组展示用（插件开发规范要求，见 docs/PLUGIN-DEV.md）
+DECLARED_COMMANDS: dict[str, tuple[str, str]] = {
+    "/记忆 <内容>": ("记一条长期记忆", "公开"),
+    "/忘记 <关键词>": ("删除匹配的长期记忆", "公开"),
+}
+
 ROOT = _detect_root()
 DATA_DIR = Path(os.environ.get("QQNTBOT_DATA", str(ROOT / "data")))
 DB_PATH = DATA_DIR / "memory.db"

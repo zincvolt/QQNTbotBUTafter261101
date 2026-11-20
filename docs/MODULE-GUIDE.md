@@ -99,13 +99,48 @@ async def cmd(self, event: AstrMessageEvent):
 
 ---
 
-## 3. 现有三个模块（照着抄最快）
+## 2.5 指令自声明（必备规范，2026-11-20 起强制）
+
+**每个插件必须在 `main.py` 顶层声明自己的指令清单。** 这是插件加入统一权限管理（access 闸门）的前提：`/权限 列表` 的按插件分组图卡就是从这里自动读取的（ast 解析字面量，不执行插件代码）。
+
+### 有斜线指令的插件
+
+```python
+# 指令自声明：/权限 列表 按插件分组展示用（插件开发规范要求）
+DECLARED_COMMANDS: dict[str, tuple[str, str]] = {
+    "/指令 <参数>": ("一句话说明", "公开"),   # 级别：公开 / 管理 / 超管
+    "/指令 子命令": ("一句话说明", "管理"),
+}
+```
+
+- 键写**用户实际输入的完整形式**（带 `/`，带子命令和参数占位）
+- 值是 `(说明, 级别)` 二元组；级别要与 access 权限表里该指令的级别一致
+- 同义别名写进说明里即可（如 dice：`"掷骰（同义别名：roll/dice/骰/掷骰/投骰）"`），不用每个别名一条
+
+### 无斜线指令的插件（纯被动行为）
+
+```python
+DECLARED_COMMANDS: dict[str, tuple[str, str]] = {}
+DECLARED_BEHAVIOR = "无斜线指令：一句话说清被动行为（注入防护/复读/缓存等）"
+```
+
+### 规则
+
+1. **新增插件必须带声明**——没有声明的插件会在 `/权限 列表` 图卡的「⚠ 未声明指令」节里被点名
+2. **改了指令（增删改子命令）要同步改声明**，否则权限表展示过时
+3. access 启动时自动扫描全部插件目录（`ast.literal_eval` 安全提取），无需注册
+4. 声明的级别是展示口径；真正拦截以 access 权限表（`/权限 设置`）为准，两者别矛盾
+
+---
+
+## 3. 现有模块（照着抄最快）
 
 | 模块 | 用到的钩子 | 干了什么 |
 |---|---|---|
 | `astrbot_plugin_peer` | `on_astrbot_loaded`、`on_decorating_result` | 载入人格、静默过滤、冷群水群 |
 | `astrbot_plugin_ltm` | `on_llm_request`、`on_llm_response`、`on_astrbot_loaded`、`command` | 记忆注入、抽取、群历史扫描 |
 | `astrbot_plugin_websearch` | `on_llm_request`、`llm_tool` | 自动检索 + 工具调用 |
+| `astrbot_plugin_dice` | `command("r", alias=...)` | 桌游骰子，只输出随机数；精确指令、无全局处理器 |
 
 **读代码顺序建议**：`peer/main.py`（最短，看人格与静默）→ `websearch/main.py`（看请求注入）→ `ltm/main.py`（看后台任务与存储）。
 
@@ -250,6 +285,12 @@ $py = 'D:\QQNTBOT\apps\AstrBot\.venv\Scripts\python.exe'
 
 6. **不要在插件里直接写 AstrBot 的数据库**
    用 `?mode=ro` 只读打开；要写就写自己的库（本项目写在 `data\memory.db`）。
+
+7. **新指令别抢别人的斜杠命令**
+   只注册精确的 `@filter.command("名字")`，匹配上再 `stop_event()`；不要为了
+   「智能一点」注册 `event_message_type(ALL)` + 模糊兜底。兽聚插件曾用「带地名
+   就当展会查询」吞掉过别的 `/` 指令，修了很久。骰娘插件是反面教训的正例：
+   6 个精确别名、没有全局 handler、解析失败也只回提示。
 
 ---
 
