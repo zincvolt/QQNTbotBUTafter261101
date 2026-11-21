@@ -113,6 +113,12 @@ Write-Host '=== 6/7 dashboard (6190) ==='
 Start-ScriptService -Port 6190 -Label 'dashboard' -ScriptPath 'D:\QQNTBOT\scripts\start-dashboard.ps1' -Timeout 40 | Out-Null
 if (-not $NoBrowser) { Start-Process 'http://127.0.0.1:6190' }
 
+# 外部看门狗：AstrBot 挂了也能经 NapCat HTTP(6198) 私信报信（无端口，静默常驻）
+Start-Process -WindowStyle Hidden -FilePath $BotPython `
+    -ArgumentList @('D:\QQNTBOT\scripts\watchdog.py') `
+    -RedirectStandardOutput 'D:\QQNTBOT\_backup\watchdog.out' `
+    -RedirectStandardError 'D:\QQNTBOT\_backup\watchdog.err'
+
 Write-Host '=== 7/7 summary ==='
 Show-Status @(
     @{ Port = 6190; Label = 'dashboard  http://127.0.0.1:6190' },
