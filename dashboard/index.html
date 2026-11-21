@@ -156,10 +156,12 @@
 
 <div class="tabs">
   <button class="active" onclick="goTab(this,'overview')">概览</button>
+  <button onclick="goTab(this,'quota')">额度</button>
   <button onclick="goTab(this,'chat')">对话</button>
   <button onclick="goTab(this,'judge')">判官</button>
   <button onclick="goTab(this,'memory')">记忆</button>
   <button onclick="goTab(this,'vision')">视觉</button>
+  <button onclick="goTab(this,'affection')">好感度</button>
   <button onclick="goTab(this,'system')">系统</button>
 </div>
 
@@ -178,10 +180,10 @@
 
   <div class="panel">
     <h2>全账户 Token 用量 <span class="meta" id="usageDate">今日</span></h2>
-    <div class="hint" style="margin-bottom:10px">四路合计（主对话 + 判官 + 识图补描述 + 记忆抽取），对齐 DeepSeek 开放平台账单。本地模型推理不计入。</div>
+    <div class="hint" style="margin-bottom:10px">所有群合计（主对话 + 判官 + 识图补描述 + 记忆抽取四路），对齐 DeepSeek 开放平台账单。本地模型推理不计入。<b>分群明细见「额度」页</b>。</div>
     <div id="usageRows" style="display:grid;gap:8px"><div class="empty">加载中…</div></div>
     <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
-      <span>今日合计</span><b id="usageTotal" style="font-size:16px">–</b>
+      <span>今日合计（所有群）</span><b id="usageTotal" style="font-size:16px">–</b>
     </div>
     <div class="two" style="margin-top:14px">
       <div>
@@ -199,7 +201,7 @@
       <label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" id="usageLtmEnabled" style="width:auto"> 记忆抽取启用</label>
       <span class="hint" id="usageMsg"></span>
     </div>
-    <div class="hint" style="margin-top:8px">主对话额度在「系统」页的「审查 · 额度」区改（含分群额度），判官额度在「判官」页改（两处独立）。超额后：识图跳过补描述（按需发原图兜底）、记忆抽取暂停本轮、判官在主对话额度耗尽时整体跳过。</div>
+    <div class="hint" style="margin-top:8px">聊天/判官/识图三类额度统一在「额度」页改（含全局默认 + 每群上限）；记忆抽取额度仍在本页下方改。超额后：识图跳过补描述（按需发原图兜底）、记忆抽取暂停本轮、判官在主对话额度耗尽时整体跳过。</div>
   </div>
 
   <div class="panel">
@@ -229,6 +231,45 @@
     <div class="panel" data-caps="botdb">
       <h2>最近对话</h2>
       <ul id="chatlist"><li class="empty">加载中…</li></ul>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 额度 ============ -->
+<section class="tabpane" id="pane-quota">
+  <div class="panel">
+    <h2>Token 额度 <span class="meta">下拉选群 · 全局默认值为兜底 · 每群上限填 0 = 跟随全局 · 保存即时生效</span></h2>
+    <div class="hint" style="margin-bottom:12px">
+      三类额度独立核算：<b>聊天主对话</b>（api_mode.json）、<b>判官</b>（judge_api.json）、<b>识图补描述</b>（vision_usage.json）。
+      每类都有全账户硬上限 + 每群上限；任一触顶即停该渠道。本地模型推理不计入。
+    </div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:14px">
+      <label style="margin:0;color:var(--text)">选择群号
+        <select id="quotaGroup" onchange="loadQuotaDetail()" style="min-width:200px"></select>
+      </label>
+      <span class="hint" id="quotaMsg"></span>
+    </div>
+    <div id="quotaDetail" style="display:grid;gap:14px"><div class="empty">加载中…</div></div>
+    <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="primary" onclick="saveQuota()">保存额度</button>
+      <button onclick="loadQuota()">放弃改动 / 刷新</button>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 好感度 ============ -->
+<section class="tabpane" id="pane-affection">
+  <div class="panel">
+    <h2>主动搭话 · 好感度 <span class="meta">手调后主动私聊概率立即按新值计算 · 0=从不主动，100=最常主动</span></h2>
+    <div class="hint" style="margin-bottom:12px">
+      好感度决定「主动搭话」给对方发私聊的概率（基准概率 × 好感度/100）。这里手调的值<b>优先于</b>聊天自然涨落；
+      创造者恒为 100、不可改。发消息仍受最小间隔/日限/活跃时段等硬约束，防骚扰。
+    </div>
+    <div id="affectionList" style="display:grid;gap:10px"><div class="empty">加载中…</div></div>
+    <div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="primary" onclick="saveAffection()">保存好感度</button>
+      <button onclick="loadAffection()">放弃改动 / 刷新</button>
+      <span class="hint" id="affectionMsg"></span>
     </div>
   </div>
 </section>
@@ -1017,10 +1058,14 @@ function goTab(btn, name) {
   btn.classList.add('active');
   document.querySelectorAll('.tabpane').forEach(p => p.classList.remove('active'));
   document.getElementById('pane-' + name).classList.add('active');
+  // 切进这两个 tab 时重新拉数据：页面首次加载若撞上服务重启窗口，
+  // 这两个 fetch 会静默失败，进来时再拉一次即可自愈。
+  if (name === 'quota' && typeof loadQuota === 'function') loadQuota();
+  if (name === 'affection' && typeof loadAffection === 'function') loadAffection();
 }
 
 function goTabById(name) {
-  const idx = ['overview','chat','judge','memory','vision','system'].indexOf(name);
+  const idx = ['overview','quota','chat','judge','memory','vision','affection','system'].indexOf(name);
   const btn = document.querySelectorAll('.tabs button')[idx];
   if (btn) goTab(btn, name);
 }
@@ -1686,6 +1731,145 @@ async function saveGuardConfig() {
   document.getElementById('guardMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
 }
 
+/* ---------------- 额度页（统一分群三类额度） ---------------- */
+let QUOTA_CACHE = null;
+const QUOTA_CH = [['chat','聊天主对话'],['judge','判官'],['vision','识图补描述']];
+
+async function loadQuota() {
+  try {
+    const r = await (await fetch('/api/quota?t=' + Date.now())).json();
+    QUOTA_CACHE = r;
+    const sel = document.getElementById('quotaGroup');
+    const prev = sel.value;
+    sel.innerHTML = '<option value="__global__">【全局默认值】</option>' +
+      (r.groups || []).map(g => `<option value="${esc(g)}">${esc(g)}</option>`).join('');
+    if (prev && [...sel.options].some(o => o.value === prev)) sel.value = prev;
+    renderQuotaGlobal();
+    const qm = document.getElementById('quotaMsg');
+    if (qm && !r.groups) qm.textContent = '额度数据为空';
+  } catch (e) {
+    console.error('loadQuota', e);
+    const qm = document.getElementById('quotaMsg');
+    if (qm) qm.textContent = '额度加载失败，请点「放弃改动 / 刷新」重试';
+  }
+}
+
+function renderQuotaGlobal() {
+  const r = QUOTA_CACHE; if (!r) return;
+  const c = r.channels || {};
+  document.getElementById('quotaDetail').innerHTML = `
+    <div class="pitem" style="display:block">
+      <div style="color:var(--text);font-weight:600;margin-bottom:8px">全局默认值（兜底上限 · 全账户硬顶）</div>
+      <div class="two" style="gap:10px">
+        ${QUOTA_CH.map(([k,label]) => {
+          const info = c[k] || {};
+          return `<div>
+            <label>${label} 全局上限</label>
+            <input type="number" min="0" step="10000" id="qg_${k}" value="${Number(info.global_limit)||0}" placeholder="0=不限">
+            <div class="hint" style="margin-top:3px">今日全账户已用 ${fmtTokens(info.global_used||0)}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+    <div class="pitem" style="display:block">
+      <div style="color:var(--text);font-weight:600;margin-bottom:6px">当前选择：<b id="quotaSelLabel">—</b></div>
+      <div id="quotaGroupDetail"><span class="hint">从上方下拉选一个群，查看/修改该群三类额度与今日用量。</span></div>
+    </div>`;
+  loadQuotaDetail();
+}
+
+function loadQuotaDetail() {
+  const r = QUOTA_CACHE; if (!r) return;
+  const sel = document.getElementById('quotaGroup');
+  const gid = sel ? sel.value : '__global__';
+  const label = document.getElementById('quotaSelLabel');
+  const box = document.getElementById('quotaGroupDetail');
+  if (!box) return;
+  if (gid === '__global__') {
+    if (label) label.textContent = '全局默认值';
+    box.innerHTML = '<span class="hint">全局额度如上。要单独控制某个群，请在下拉里选群号。</span>';
+    return;
+  }
+  if (label) label.textContent = gid;
+  const c = r.channels || {};
+  box.innerHTML = `<div class="two" style="gap:10px">
+    ${QUOTA_CH.map(([k, l]) => {
+      const info = c[k] || {};
+      const gl = info.group_limits || {}, gu = info.group_used || {};
+      const lim = Number(gl[gid]) || 0;
+      const used = Number(gu[gid]) || 0;
+      const g = info.global_limit || 0;
+      const effective = lim || g;
+      const pct = effective ? Math.min(100, Math.round(used/effective*100)) : 0;
+      return `<div>
+        <label>${l} · 本群上限</label>
+        <input type="number" min="0" step="10000" class="qGroupLimit" data-ch="${k}" data-gid="${esc(gid)}"
+          value="${lim}" placeholder="0=跟随全局(${fmtTokens(g)})">
+        <div class="hint" style="margin-top:3px">今日已用 ${fmtTokens(used)} / 生效上限 ${effective?fmtTokens(effective):'不限'} (${pct}%)</div>
+      </div>`;
+    }).join('')}
+  </div>`;
+}
+
+async function saveQuota() {
+  if (!QUOTA_CACHE) return;
+  const body = {};
+  QUOTA_CH.forEach(([k]) => {
+    const gEl = document.getElementById('qg_' + k);
+    const gl = {};
+    document.querySelectorAll('.qGroupLimit[data-ch="' + k + '"]').forEach(el => {
+      gl[el.dataset.gid] = parseInt(el.value || '0', 10) || 0;
+    });
+    body[k] = { global_limit: gEl ? (parseInt(gEl.value || '0', 10) || 0) : 0, group_limits: gl };
+  });
+  document.getElementById('quotaMsg').textContent = '保存中…';
+  try {
+    const res = await (await fetch('/api/quota', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    })).json();
+    document.getElementById('quotaMsg').textContent = res.msg || (res.ok ? '已保存' : '失败');
+    setTimeout(loadQuota, 400);
+  } catch (e) { document.getElementById('quotaMsg').textContent = '保存失败：' + e; }
+}
+
+/* ---------------- 好感度页 ---------------- */
+async function loadAffection() {
+  try {
+    const r = await (await fetch('/api/affection?t=' + Date.now())).json();
+    document.getElementById('affectionList').innerHTML = (r.items || []).map(it => {
+      const locked = it.is_creator;
+      return `<div class="pitem" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+        <span style="color:var(--text);min-width:120px">${esc(it.uid)}
+          ${it.is_creator ? '<span class="meta">创造者</span>' : ''}
+          ${it.overridden ? '<span class="meta">手调</span>' : ''}</span>
+        <input type="number" min="0" max="100" step="1" ${locked ? 'disabled' : ''}
+          class="affNum" data-uid="${esc(it.uid)}" value="${Number(it.score)||0}" style="width:72px">
+        <span class="meta">0–100 · ${it.msgs||0} 条消息</span>
+      </div>`;
+    }).join('') || '<span class="hint">还没有主动搭话候选</span>';
+  } catch (e) {
+    console.error('loadAffection', e);
+    const box = document.getElementById('affectionList');
+    if (box) box.innerHTML = '<span class="hint">好感度加载失败，请点「放弃改动 / 刷新」重试</span>';
+  }
+}
+
+async function saveAffection() {
+  const scores = {};
+  document.querySelectorAll('.affNum:not([disabled])').forEach(el => {
+    scores[el.dataset.uid] = parseInt(el.value || '0', 10) || 0;
+  });
+  document.getElementById('affectionMsg').textContent = '保存中…';
+  try {
+    const res = await (await fetch('/api/affection', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({scores})
+    })).json();
+    document.getElementById('affectionMsg').textContent = res.msg || (res.ok ? '已保存' : '失败');
+    setTimeout(loadAffection, 400);
+  } catch (e) { document.getElementById('affectionMsg').textContent = '保存失败：' + e; }
+}
+
 async function loadThinking() {
   try {
     const r = await (await fetch('/api/thinking?t=' + Date.now())).json();
@@ -2003,6 +2187,8 @@ loadLtmPrompt();
 loadLtmSettings();
 loadProfile();
 loadTokenUsage();
+loadQuota();
+loadAffection();
 setInterval(refresh, 5000);
 </script>
 </body>

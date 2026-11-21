@@ -50,11 +50,14 @@ BOT_LOG_DIR = ROOT / "apps" / "AstrBot" / "data" / "logs"
 PERSONA_FILE = ROOT / "data" / "persona.json"
 JUDGE_FILE = ROOT / "data" / "judge.json"
 JUDGE_API_FILE = ROOT / "data" / "judge_api.json"
+API_MODE_FILE = ROOT / "data" / "api_mode.json"
 WATER_FILE = ROOT / "data" / "water.json"
+AFFECTION_EDIT_FILE = ROOT / "data" / "affection_edit.json"
 AUTOREPLY_FILE = ROOT / "data" / "autoreply.json"
 REPLY_FILE = ROOT / "data" / "reply.json"
 LTM_FILE = ROOT / "data" / "ltm.json"
 PLUGIN_DIR = ROOT / "apps" / "AstrBot" / "data" / "plugins"
+CREATOR_DATA_FILE = PLUGIN_DIR / "astrbot_plugin_creator" / "creator_data.json"
 JUDGE_URL = "http://127.0.0.1:8082/v1/chat/completions"
 
 CAPTION_DB = ROOT / "data" / "caption_cache.db"
@@ -1418,6 +1421,182 @@ async def save_token_usage(request: Request) -> JSONResponse:
         write_json(path, d)
         changed.append(name)
     return JSONResponse({"ok": True, "msg": f"已保存：{', '.join(changed) or '无变更'}（立即生效）"})
+
+
+# ---------------------------------------------------------------- 统一分群额度 API
+# 三类额度（聊天/判官/识图）各有「全局默认 + 每群上限(0=跟随全局) + 今日用量」。
+# 主对话账本 api_mode.json，判官 judge_api.json，识图 vision_usage.json，
+# 当前日期跨天归零由各写入方负责；这里只做读取汇总与配置写入。
+QUOTA_CHANNELS = (
+    ("chat", "聊天主对话"),
+    ("judge", "判官"),
+    ("vision", "识图补描述"),
+)
+
+
+def _quota_groups() -> list[str]:
+    """群号列表：白名单群优先，再并入历史里见过的群。"""
+    groups = [str(x) for x in read_access()["groups"]]
+    seen = set(groups)
+    for item in known_groups():
+        gid = str(item.get("id") or "")
+        if gid and gid not in seen:
+            seen.add(gid)
+            groups.append(gid)
+    return groups
+
+
+@app.get("/api/quota")
+def get_quota() -> JSONResponse:
+    """Aggregate per-group limits and today's usage for all three channels."""
+    today = datetime.now().strftime("%Y%m%d")
+    groups = _quota_groups()
+
+    main = read_json(GUARD_FILE, {})
+    judge = read_json(JUDGE_API_FILE, {})
+    vision = _aux_usage(VISION_USAGE)
+
+    main_used = main.get("used") or {}
+    judge_used = judge.get("used") or {}
+    main_date_ok = main_used.get("date") == today
+    judge_date_ok = judge_used.get("date") == today
+
+    # 各渠道：全局默认额度 / 全局已用 / 每群上限 / 每群已用
+    chans = {
+        "chat": {
+            "global_limit": int(main.get("daily_limit") or 0),
+            "global_used": int(main_used.get("tokens") or 0) if main_date_ok else 0,
+            "group_limits": {str(k): int(v or 0) for k, v in (main.get("group_limits") or {}).items()},
+            "group_used": {str(k): int(v or 0) for k, v in (main_used.get("groups") or {}).items()},
+        },
+        "judge": {
+            "global_limit": int(judge.get("daily_limit") or 0),
+            "global_used": int(judge_used.get("tokens") or 0) if judge_date_ok else 0,
+            "group_limits": {str(k): int(v or 0) for k, v in (judge.get("group_limits") or {}).items()},
+            "group_used": {str(k): int(v or 0) for k, v in (judge_used.get("groups") or {}).items()},
+        },
+        "vision": {
+            "global_limit": int(vision.get("daily_limit") or 0),
+            "global_used": int(vision.get("tokens") or 0),
+            "group_limits": {str(k): int(v or 0) for k, v in (vision.get("group_limits") or {}).items()},
+            "group_used": {str(k): int(v or 0) for k, v in (vision.get("groups") or {}).items()},
+        },
+    }
+    return JSONResponse({
+        "date": today,
+        "groups": groups,
+        "channels": chans,
+        "channel_names": {k: v for k, v in QUOTA_CHANNELS},
+        # 概览用：所有群/全账户合计（就是各渠道全局今日用量）
+        "totals": {k: chans[k]["global_used"] for k, _ in QUOTA_CHANNELS},
+        "total": sum(chans[k]["global_used"] for k, _ in QUOTA_CHANNELS),
+    })
+
+
+@app.post("/api/quota")
+async def save_quota(request: Request) -> JSONResponse:
+    """Merge-save global defaults and per-group limits for the three channels."""
+    body = await request.json()
+    changed = []
+
+    def _int(v) -> int:
+        return max(0, min(10_000_000, int(v)))
+
+    # 聊天 → api_mode.json (GUARD_FILE)
+    q = body.get("chat")
+    if isinstance(q, dict):
+        st = read_json(GUARD_FILE, {})
+        if "global_limit" in q:
+            st["daily_limit"] = _int(q["global_limit"])
+        if isinstance(q.get("group_limits"), dict):
+            gl = dict(st.get("group_limits") or {})
+            for k, v in q["group_limits"].items():
+                gl[str(k)] = _int(v)
+            st["group_limits"] = gl
+        write_json(GUARD_FILE, st)
+        changed.append("chat")
+
+    # 判官 → judge_api.json
+    q = body.get("judge")
+    if isinstance(q, dict):
+        st = read_json(JUDGE_API_FILE, {})
+        if "global_limit" in q:
+            st["daily_limit"] = _int(q["global_limit"])
+        if isinstance(q.get("group_limits"), dict):
+            gl = dict(st.get("group_limits") or {})
+            for k, v in q["group_limits"].items():
+                gl[str(k)] = _int(v)
+            st["group_limits"] = gl
+        write_json(JUDGE_API_FILE, st)
+        changed.append("judge")
+
+    # 识图 → vision_usage.json
+    q = body.get("vision")
+    if isinstance(q, dict):
+        st = _aux_usage(VISION_USAGE)
+        if "global_limit" in q:
+            st["daily_limit"] = _int(q["global_limit"])
+        if isinstance(q.get("group_limits"), dict):
+            gl = dict(st.get("group_limits") or {})
+            for k, v in q["group_limits"].items():
+                gl[str(k)] = _int(v)
+            st["group_limits"] = gl
+        write_json(VISION_USAGE, st)
+        changed.append("vision")
+
+    return JSONResponse({"ok": True, "msg": f"已保存：{', '.join(changed) or '无变更'}（立即生效）"})
+
+
+# ---------------------------------------------------------------- 好感度面板 API
+@app.get("/api/affection")
+def get_affection() -> JSONResponse:
+    """List active-chat candidates with their current affection (panel view)."""
+    cfg = read_json(CFG, {})
+    entries = (cfg.get("platform_settings") or {}).get("id_whitelist", []) or []
+    friends = [str(e).rsplit(":", 1)[-1] for e in entries if "FriendMessage" in str(e)]
+    creator = str((read_json(CFG, {}).get("admins_id") or ["1154487120"])[0])
+    if creator and creator not in friends:
+        friends.append(creator)
+    creator_id = "1154487120"
+    data = read_json(CREATOR_DATA_FILE, {})
+    aff = data.get("affection") or {}
+    edits = read_json(AFFECTION_EDIT_FILE, {})
+    rows = []
+    for uid in friends:
+        is_creator = uid == creator_id
+        base = 100.0 if is_creator else 50.0
+        rec = aff.get(uid) or {}
+        # 创造者恒 100（与插件 _affection() 口径一致），面板不可改
+        score = 100.0 if is_creator else float(edits.get(uid, rec.get("score", base)))
+        rows.append({
+            "uid": uid,
+            "score": round(score, 1),
+            "msgs": int(rec.get("msgs") or 0),
+            "last_seen": rec.get("last_seen") or 0,
+            "is_creator": is_creator,
+            "overridden": (not is_creator) and uid in edits,
+        })
+    rows.sort(key=lambda r: -r["score"])
+    return JSONResponse({"items": rows, "creator_id": creator_id})
+
+
+@app.post("/api/affection")
+async def save_affection(request: Request) -> JSONResponse:
+    """Save panel-authored affection overrides into affection_edit.json."""
+    body = await request.json()
+    scores = body.get("scores")
+    if not isinstance(scores, dict):
+        return JSONResponse({"ok": False, "msg": "scores 必须是对象"})
+    edits = read_json(AFFECTION_EDIT_FILE, {})
+    for uid, v in scores.items():
+        if str(uid) == "1154487120":
+            continue  # 创造者恒 100，不接受覆盖
+        try:
+            edits[str(uid)] = round(max(0.0, min(100.0, float(v))), 1)
+        except (TypeError, ValueError):
+            return JSONResponse({"ok": False, "msg": f"{uid} 好感度必须是数字"})
+    write_json(AFFECTION_EDIT_FILE, edits)
+    return JSONResponse({"ok": True, "msg": "好感度已保存（主动搭话概率立即生效）"})
 
 
 @app.get("/api/water")
