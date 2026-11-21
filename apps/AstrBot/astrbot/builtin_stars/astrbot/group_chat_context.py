@@ -525,7 +525,7 @@ def load_judge_api_config() -> dict:
         "api_key": str(raw.get("api_key") or "").strip(),
         "model": str(raw.get("model") or "").strip(),
         "prompt": prompt,
-        "recent_max": _as_int(raw.get("recent_max"), 3, 1, 8),
+        "recent_max": _as_int(raw.get("recent_max"), 3, 1, 30),
         "recent_chars": _as_int(raw.get("recent_chars"), 60, 20, 200),
         "include_last_bot": bool(raw.get("include_last_bot", True)),
         "max_tokens": _as_int(raw.get("max_tokens"), 2, 1, 8),
@@ -1533,7 +1533,7 @@ class GroupChatContext:
             logger.info(f"group judge | 过短不接 | {message[:20]}")
             return False
 
-        recent = list(self.raw_records.get(umo, []))[-8:]
+        recent = list(self.raw_records.get(umo, []))[-12:]
         context = "\n".join(str(r) for r in recent) or "(暂无更早消息)"
         prompt = judge_cfg["prompt"].replace("{recent}", context).replace(
             "{message}", message

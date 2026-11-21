@@ -1,11 +1,11 @@
 {
   "enable": true,
   "api_base": "https://api.deepseek.com/v1",
-  "api_key": "",
+  "api_key": "sk-90c44ddf8a074b2fb2c7c2387b017fbd",
   "model": "deepseek-flash",
-  "prompt": "群聊接话判定：最后一条要不要回。\n- @它、叫它名字、追问或纠正它 → 1\n- 向它提问、倾诉、求助 → 1\n- 别人互聊、说自己的安排、与它无关 → 0\n- 骂人、复读、纯表情、尖叫 → 0\n\n最近：\n{recent}\n\n它刚说：{last_bot}\n\n新消息：{message}\n\n只回 1 或 0。",
-  "recent_max": 3,
-  "recent_chars": 60,
+  "prompt": "群聊接话判定：最后一条要不要回。\n- @它、叫它名字、追问或纠正它 → 1\n- 向它提问、倾诉、求助 → 1\n- 别人互聊、说自己的安排、与它无关 → 0\n- 骂人、复读、纯表情、尖叫 → 0\n- 不了解事情全貌（只看到片段）→ 0，不要随意发言；判断前先看完最近这 12 条聊天记录，看完仍不明白就 0\n\n最近：\n{recent}\n\n它刚说：{last_bot}\n\n新消息：{message}\n\n只回 1 或 0。",
+  "recent_max": 12,
+  "recent_chars": 250,
   "include_last_bot": true,
   "max_tokens": 2,
   "temperature": 0,
@@ -13,16 +13,29 @@
   "use_reply_chance": false,
   "reply_chance": 1.0,
   "fallback_chance": 0.3,
-  "cache_seconds": 30,
-  "judge_delay": 2.0,
+  "cache_seconds": 3000,
+  "daily_limit": 50000,
+  "used": {
+    "date": "20261121",
+    "tokens": 14564
+  },
+  "ignore": [],
+  "force_reply": [],
+  "force_patterns": [],
+  "followup_patterns": [
+    "(?:你|阿灰|灰灰).{0,8}(?:不是|怎么|为什么|为啥|刚才|刚刚|说的|叫|汪|喵)",
+    "你不是.{0,6}吗",
+    "(?:你|阿灰|灰灰)是(?:猫|狗|狼|人|机器人)吗"
+  ],
+  "judge_delay": 2,
   "reply_gap": 6,
   "inflight_ttl": 45,
   "inflight_lock": true,
   "dup_window": 45,
-  "dup_ratio": 0.75,
+  "dup_ratio": 0.79,
   "burst_enable": true,
   "burst_gap": 15,
-  "burst_settle": 3.5,
+  "burst_settle": 5,
   "burst_reuse": 45,
   "summon_gap": 4,
   "break_follow": 30,
@@ -49,18 +62,5 @@
     "狗东西",
     "你妈",
     "欠揍"
-  ],
-  "daily_limit": 50000,
-  "used": {
-    "date": "",
-    "tokens": 0
-  },
-  "ignore": [],
-  "force_reply": [],
-  "force_patterns": [],
-  "followup_patterns": [
-    "(?:你|阿灰|灰灰).{0,8}(?:不是|怎么|为什么|为啥|刚才|刚刚|说的|叫|汪|喵)",
-    "你不是.{0,6}吗",
-    "(?:你|阿灰|灰灰)是(?:猫|狗|狼|人|机器人)吗"
   ]
 }
