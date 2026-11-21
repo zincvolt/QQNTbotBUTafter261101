@@ -139,12 +139,12 @@ DECLARED_BEHAVIOR = "无斜线指令：一句话说清被动行为（注入防�
 
 | 模块 | 用到的钩子 | 干了什么 |
 |---|---|---|
-| `astrbot_plugin_peer` | `on_astrbot_loaded`、`on_decorating_result` | 载入人格、静默过滤、冷群水群 |
+| `astrbot_plugin_basicz` | `on_astrbot_loaded`、`on_decorating_result` | 载入人格、静默过滤、冷群水群 |
 | `astrbot_plugin_ltm` | `on_llm_request`、`on_llm_response`、`on_astrbot_loaded`、`command` | 记忆注入、抽取、群历史扫描 |
 | `astrbot_plugin_websearch` | `on_llm_request`、`llm_tool` | 自动检索 + 工具调用 |
 | `astrbot_plugin_dice` | `command("r", alias=...)` | 桌游骰子，只输出随机数；精确指令、无全局处理器 |
 
-**读代码顺序建议**：`peer/main.py`（最短，看人格与静默）→ `websearch/main.py`（看请求注入）→ `ltm/main.py`（看后台任务与存储）。
+**读代码顺序建议**：`basicz/main.py`（最短，看人格与静默）→ `websearch/main.py`（看请求注入）→ `ltm/main.py`（看后台任务与存储）。
 
 ---
 

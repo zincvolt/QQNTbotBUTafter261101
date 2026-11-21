@@ -47,7 +47,7 @@
 
 ## 4. 什么时候才真的读图
 
-不管哪种模式，都先过一道判断（`astrbot_plugin_peer` 里的 `_should_read_images`）。
+不管哪种模式，都先过一道判断（`astrbot_plugin_basicz` 里的 `_should_read_images`）。
 **这一步纯字符串匹配，不调模型，0 token、0 延迟。**
 
 | 条件 | 结果 |
@@ -165,7 +165,7 @@ flash 优先——第一版没跳本地，选中了 8084 的 vl-ocr 占位 provi
   多给上下文无害）。
 - **判官触发的主动接话**：判官不看图、也没人叫它，只有当前这条话真的
   在谈图（带图，或命中 peer 的 `VISION_HINTS` 词表）才注入历史图描述，
-  否则整段跳过。词表从 peer 导入（`from astrbot_plugin_peer.main import
+  否则整段跳过。词表从 peer 导入（`from astrbot_plugin_basicz.main import
   VISION_HINTS`），peer 改词表这边跟着变。
 
 实现：判官放行时（`group_chat_context.py`，含概率兜底路径；召唤词直通、
@@ -296,8 +296,8 @@ captions(
 | 插件 | 时机 | 命中后 |
 |---|---|---|
 | `astrbot_plugin_vision_context` | 群里每张新图后台识一次 | 直接进上下文缓冲，0 秒 |
-| `astrbot_plugin_peer`（本地模式） | 有人问图时 | 不调 VL，直接用存的描述 |
-| `astrbot_plugin_peer`（第三方模式） | 有人问图时 | **整张图都不发出去**，只发文字，省 1000~2000 token |
+| `astrbot_plugin_basicz`（本地模式） | 有人问图时 | 不调 VL，直接用存的描述 |
+| `astrbot_plugin_basicz`（第三方模式） | 有人问图时 | **整张图都不发出去**，只发文字，省 1000~2000 token |
 
 第三方模式那条是关键：图不进 API，只把存下来的描述拼进 prompt。
 

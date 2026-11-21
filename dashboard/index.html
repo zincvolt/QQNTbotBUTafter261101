@@ -199,7 +199,7 @@
       <label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" id="usageLtmEnabled" style="width:auto"> 记忆抽取启用</label>
       <span class="hint" id="usageMsg"></span>
     </div>
-    <div class="hint" style="margin-top:8px">主对话额度在「系统」页改，判官额度在「判官」页改（两处独立）。超额后：识图跳过补描述（按需发原图兜底）、记忆抽取暂停本轮、判官在主对话额度耗尽时整体跳过。</div>
+    <div class="hint" style="margin-top:8px">主对话额度在「系统」页的「审查 · 额度」区改（含分群额度），判官额度在「判官」页改（两处独立）。超额后：识图跳过补描述（按需发原图兜底）、记忆抽取暂停本轮、判官在主对话额度耗尽时整体跳过。</div>
   </div>
 
   <div class="panel">
@@ -365,16 +365,22 @@
   </div>
 
   <div class="panel" data-caps="config,botdb">
-    <h2>冷场水群 <span class="meta">白名单外的群默认关闭</span></h2>
+    <h2>冷场热群 · 空闲时长 <span class="meta">开关在下方「群聊开关」里的「热群」</span></h2>
+    <div class="hint" style="margin-bottom:10px">这里只设"冷场多少分钟后发暖场话"。热群的总开关在「群聊开关」面板的「热群」一项（对应 /群聊 热群开/关）；两者都开才会发。</div>
     <div class="plist" id="waterList"><span class="hint">加载中…</span></div>
     <div style="margin-top:10px">
-      <button onclick="saveWater()">保存水群设置</button>
+      <button onclick="saveWater()">保存空闲时长</button>
       <span class="hint" id="waterMsg"></span>
     </div>
   </div>
 
   <div class="panel" data-caps="config,botdb">
-    <h2>群聊开关 <span class="meta">对应 /群聊 /进群提醒 指令 · 主动发言默认关 · 保存即时生效</span></h2>
+    <h2>群聊开关 <span class="meta">对应 /群聊 /进群提醒 指令 · 保存即时生效</span></h2>
+    <div class="hint" style="margin-bottom:10px;line-height:1.7">
+      <b style="color:var(--text)">主动冒泡</b>：没被叫也会选择性接话（判官判定），本项目主特色，默认开。<br>
+      <b style="color:var(--text)">热群</b>：冷场超过设定时长后发一条预设暖场话，次要功能，默认关；空闲时长在上方「冷场热群」面板调。<br>
+      两者独立，别搞混。旧名 接话=冒泡、发言=热群。
+    </div>
     <div class="plist" id="flagsList"><span class="hint">加载中…</span></div>
     <div style="margin-top:10px">
       <button onclick="saveGroupFlags()">保存群聊开关</button>
@@ -815,6 +821,16 @@
         </div>
       </div>
     </div>
+
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line)">
+      <div style="display:flex;justify-content:space-between;align-items:baseline">
+        <label style="color:var(--text)">分群额度 <span class="meta">每个群单独的上限，0 = 跟随全局</span></label>
+        <button onclick="fillGroupLimitFromGlobal()" style="font-size:12px">全部填为全局值</button>
+      </div>
+      <div class="hint" style="margin:4px 0 8px">某群用的 token 只记在它自己头上；全局额度仍是硬上限，任一触顶都停。留 0 表示这个群不单独限额。</div>
+      <div class="plist" id="groupLimitList"><span class="hint">加载中…</span></div>
+    </div>
+
     <div style="margin-top:14px">
       <button class="primary" onclick="saveGuardConfig()">保存</button>
       <span class="hint" id="guardMsg"></span>
@@ -1210,22 +1226,20 @@ async function loadWater() {
   const r = await (await fetch('/api/water')).json();
   document.getElementById('waterList').innerHTML = r.items.map(w => `
     <div class="pitem" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <label style="margin:0;display:flex;align-items:center;gap:8px;color:var(--text)">
-        <input type="checkbox" data-gid="${w.id}" ${w.enabled ? 'checked' : ''}>
-        ${w.id}${w.whitelisted ? '' : ' <span class="meta">未在白名单</span>'}
-      </label>
+      <span style="color:var(--text)">${w.id}${w.whitelisted ? '' : ' <span class="meta">未在白名单</span>'}</span>
       <span class="meta">${w.count} 条 · ${esc(w.last || '—')}</span>
       <span style="margin-left:auto;font-size:12.5px;color:#8b93a3">冷场
-        <input type="number" min="5" step="5" style="width:76px" data-idle="${w.id}" value="${w.idle_min}"> 分钟后冒泡
+        <input type="number" min="5" step="5" style="width:76px" data-idle="${w.id}" value="${w.idle_min}"> 分钟后发暖场话
       </span>
     </div>`).join('') || '<span class="hint">还没有可用群</span>';
 }
 
 async function saveWater() {
-  const items = [...document.querySelectorAll('#waterList input[type=checkbox]')].map(cb => {
-    const idle = document.querySelector(`#waterList input[data-idle="${cb.dataset.gid}"]`);
-    return { id: cb.dataset.gid, enabled: cb.checked, idle_min: Number(idle && idle.value) || 90 };
-  });
+  const items = [...document.querySelectorAll('#waterList input[data-idle]')].map(idle => ({
+    id: idle.dataset.idle,
+    enabled: true,
+    idle_min: Number(idle.value) || 90,
+  }));
   document.getElementById('waterMsg').textContent = '保存中…';
   const r = await (await fetch('/api/water', {
     method:'POST', headers:{'Content-Type':'application/json'},
@@ -1236,11 +1250,12 @@ async function saveWater() {
 
 async function loadGroupFlags() {
   const r = await (await fetch('/api/group_flags')).json();
+  const names = r.flag_names || {};
   document.getElementById('flagsList').innerHTML = r.items.map(g => `
     <div class="pitem" style="display:flex;align-items:center;gap:14px;flex-wrap:wrap">
       <span style="color:var(--text)">${g.id}${g.whitelisted ? '' : ' <span class="meta">未在白名单</span>'}</span>
-      <label style="margin:0;display:flex;align-items:center;gap:6px"><input type="checkbox" data-gid="${g.id}" data-key="proactive" ${g.proactive ? 'checked' : ''}> 主动发言</label>
-      <label style="margin:0;display:flex;align-items:center;gap:6px"><input type="checkbox" data-gid="${g.id}" data-key="reply_at" ${g.reply_at ? 'checked' : ''}> 接话（艾特）</label>
+      <label style="margin:0;display:flex;align-items:center;gap:6px" title="${names.auto_chat || '主动冒泡'}"><input type="checkbox" data-gid="${g.id}" data-key="auto_chat" ${g.auto_chat ? 'checked' : ''}> 主动冒泡</label>
+      <label style="margin:0;display:flex;align-items:center;gap:6px" title="${names.warmup || '热群'}"><input type="checkbox" data-gid="${g.id}" data-key="warmup" ${g.warmup ? 'checked' : ''}> 热群</label>
       <label style="margin:0;display:flex;align-items:center;gap:6px"><input type="checkbox" data-gid="${g.id}" data-key="welcome" ${g.welcome ? 'checked' : ''}> 进群提醒</label>
     </div>`).join('') || '<span class="hint">还没有可用群</span>';
   document.getElementById('welcomePreview').textContent = r.welcome_text || '（未取到）';
@@ -1570,8 +1585,21 @@ async function loadGuard() {
       : '<span class="hint">白名单里还没有群</span>';
     document.getElementById('quotaBox').value = r.daily_limit || 0;
     const used = r.used || {};
+    const gUsed = used.groups || {};
     document.getElementById('quotaUsed').textContent =
       '今日已用 ' + (used.tokens || 0) + ' tokens' + (used.date ? '（' + used.date + '）' : '');
+    // 分群额度：每行 = 群号 + 已用 + 额度输入（空/0 = 跟随全局）
+    const limits = r.group_limits || {};
+    document.getElementById('groupLimitList').innerHTML = groups.length
+      ? groups.map(g => `<div class="pitem" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+          <span style="color:var(--text)">${esc(g)}</span>
+          <span class="meta">今日已用 ${fmtTokens(gUsed[g] || 0)}</span>
+          <span style="margin-left:auto;font-size:12.5px;color:#8b93a3">额度
+            <input type="number" min="0" step="10000" class="groupLimitInput" data-gid="${esc(g)}"
+              value="${Number(limits[g]) || 0}" placeholder="0=跟随全局" style="width:130px">
+          </span>
+        </div>`).join('')
+      : '<span class="hint">白名单里还没有群</span>';
     document.getElementById('saveTokenBox').checked = !!r.save_token;
     document.getElementById('histKeep').value = r.history_keep || 10;
     document.getElementById('histKeepVal').textContent = (r.history_keep || 10) + ' 条';
@@ -1631,12 +1659,22 @@ async function saveTokenUsage() {
   } catch (e) { document.getElementById('usageMsg').textContent = '保存失败：' + e; }
 }
 
+function fillGroupLimitFromGlobal() {
+  const g = parseInt(document.getElementById('quotaBox').value || '0', 10) || 0;
+  document.querySelectorAll('.groupLimitInput').forEach(el => { el.value = g; });
+}
+
 async function saveGuardConfig() {
   const review = {};
   document.querySelectorAll('.reviewPick').forEach(c => { review[c.dataset.gid] = c.checked; });
+  const groupLimits = {};
+  document.querySelectorAll('.groupLimitInput').forEach(el => {
+    groupLimits[el.dataset.gid] = parseInt(el.value || '0', 10) || 0;
+  });
   const body = {
     review_groups: review,
     daily_limit: parseInt(document.getElementById('quotaBox').value || '0', 10),
+    group_limits: groupLimits,
     save_token: document.getElementById('saveTokenBox').checked,
     history_keep: parseInt(document.getElementById('histKeep').value, 10)
   };

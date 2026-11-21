@@ -71,7 +71,7 @@
 3. 装自研插件：克隆各插件独立仓库到 `apps\AstrBot\data\plugins\`（插件清单与链接见根目录 README「写了一些插件」表；插件不再存放在本仓库）：
    ```
    git clone https://github.com/zincvolt/astrbot-plugin-access     astrbot_plugin_access
-   git clone https://github.com/zincvolt/astrbot-plugin-peer       astrbot_plugin_peer
+   git clone https://github.com/zincvolt/astrbot-plugin-basicz       astrbot_plugin_basicz
    git clone https://github.com/zincvolt/astrbot-plugin-ltm        astrbot_plugin_ltm
    git clone https://github.com/zincvolt/astrbot-plugin-vision_context  astrbot_plugin_vision_context
    git clone https://github.com/zincvolt/astrbot-plugin-websearch  astrbot_plugin_websearch

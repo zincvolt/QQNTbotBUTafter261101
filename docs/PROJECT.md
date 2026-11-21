@@ -240,11 +240,11 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 | 控制 | 粒度 | 位置 | 说明 |
 |---|---|---|---|
 | 白名单 | 群 / 人 | AstrBot 配置 | 不在名单直接丢弃 |
-| 自动接话开关 | 每群 | `data\autoreply.json`（控制台） | 关掉后只有 @ 才回 |
+| 主动冒泡开关（无唤醒词选择性聊天，主特色） | 每群 | `group_flags.json` 的 `auto_chat`（控制台「群聊开关」/ `/群聊 冒泡开/关`） | 关掉后判官整体短路，只有召唤词/骰子；默认开 |
 | 召唤词直通 | 全局 | `data\judge.json` 的 `summon`（控制台） | 喊名字必回，不看概率闸 |
 | 每群回复预算 | 每群 | `data\reply.json`（控制台） | 10 分钟内最多 8 条，@ 和召唤也算 |
 | 主动回复概率 | 全局 | `data\reply.json`（控制台） | 判官判 1 后再按概率抽，默认 0.2 |
-| 水群（冷场自己开口） | 每群 | `data\water.json`（控制台） | 90 分钟没动静才开口 |
+| 热群（冷场发预设暖场话，次要） | 每群 | `group_flags.json` 的 `warmup`（`/群聊 热群开/关`）+ `data\water.json` 的 `idle_min`（空闲时长） | 单一开关 = warmup，默认关；90 分钟没动静才发 |
 
 **三条路径的优先级**：
 
@@ -333,8 +333,9 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 |---|---|
 | `data\persona.json` | 人设（控制台可编辑） |
 | `data\judge.json` | 判官提示词 + 关键词 + 必答正则 |
-| `data\autoreply.json` | 按群自动接话开关 |
-| `data\water.json` | 按群水群开关 |
+| `apps\AstrBot\data\plugins\astrbot_plugin_access\group_flags.json` | 按群主动冒泡(auto_chat)/热群(warmup)/进群提醒(welcome) 开关；旧键 reply_at/proactive 自动映射 |
+| `data\water.json` | 按群热群空闲时长（idle_min）；enabled 已废弃，总开关看 group_flags.warmup |
+| `data\api_mode.json` | 模式/全局额度/分群额度(group_limits)/用量(used.groups 按群) |
 | `data\reply.json` | 回复预算 / 召唤词开关 / 上下文时间窗 / 回复与表情概率 / 文本替换正则 |
 | `data\memory.db` | 长期记忆 |
 | `data\caption_cache.db` | 图片释义缓存 |
@@ -342,7 +343,7 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 | `scripts\_common.ps1` | 启停脚本公共函数：端口探测/停止、分离启动、env 修复 |
 | `scripts\restart-astrbot.ps1` | 只重启 AstrBot（不动 QQ，不用扫码） |
 | `apps\AstrBot\data\cmd_config.json` | AstrBot 主配置（provider/白名单/压缩等） |
-| `apps\AstrBot\data\plugins\astrbot_plugin_peer\` | 人设、闸门、水群、发图、文本处理 |
+| `apps\AstrBot\data\plugins\astrbot_plugin_basicz\` | 人设、闸门、水群、发图、文本处理 |
 | `apps\AstrBot\data\plugins\astrbot_plugin_access\` | 权限闸门：统一斜线指令鉴权（超管/管理/公开三级）、指令权限表在线编辑（/权限）、主动回复冲突仲裁（handler 分档替代 maxsize 力大砖飞）。`unified_perm.py`：统一权限判定模块，apimode/furcon/visionmode 已归并到此（取消各自 ADMINS 名单），meme_manager 走框架 PermissionType.ADMIN 同口径 |
 | `apps\AstrBot\data\plugins\astrbot_plugin_ltm\` | 记忆提取与召回 |
 | `apps\AstrBot\data\plugins\astrbot_plugin_vision_context\` | 群图释义、表情库索引、收集器 |
@@ -393,7 +394,7 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 |---|---|
 | `core\pipeline\whitelist_check\stage.py` | 未授权私聊自动回一句；2026-11-20 加 `_has_real_content()`：空文本系统事件（聊天精灵引导等）/戳一戳/合并转发静默拦截，不再回未授权（此前空事件批量触发骚扰）；同日 `process()` 改为实时读配置（配合 astrbot_plugin_access 的 /私聊 指令在线改白名单，即时生效不用重启） |
 | `core\pipeline\respond\stage.py` | `human` 分段间隔（0.45s + 字数/7） |
-| `builtin_stars\astrbot\group_chat_context.py` | 判官 `method=judge` + 按群自动接话开关；2026-11-19 加本地/第三方双后端、追问直通、条数前处理、时间窗内消息过少时按条数兜底；2026-11-20 加读 access `group_flags.json`：`/群聊 接话关` 的群判官在规则/LLM 之前整体短路（连召唤词也不接，与 peer 的 @ 拦截同口径），判官 token 零浪费；2026-11-21 加 `_mark_judge_wake`：判官放行（含概率兜底）时给 event 打 `vision_judge_wake` 标，vision_context 据此只在消息谈图时才注入历史图描述（召唤词直通/必答规则/艾特不打标，注入行为不变）；同日第三方判官 `recent_max` clamp 8→30、本地判官硬编码 8 条→12 条（配套 `judge.json`/`judge_api.json` 的「未知全貌不随意发言，看未判别的这几条」规则）；同日 API 判官支持 `?`=看不懂：框架取更早 12 条重判一次（跳缓存），仍 `?` 则放行并给主模型注入「看不懂就问」提示（`_judge_with_followup` / `_earlier_context` / `_all_records` 滚动缓冲）；同日加 `main_budget_exhausted()`：读 `api_mode.json` 今日用量，主对话额度耗尽（apimode 已拦死主动回复）时判官在条数限制后短路跳过、不花判官 token，召唤词直通不受影响，缺账本 fail-open |
+| `builtin_stars\astrbot\group_chat_context.py` | 判官 `method=judge` + 按群自动接话开关；2026-11-19 加本地/第三方双后端、追问直通、条数前处理、时间窗内消息过少时按条数兜底；2026-11-20 加读 access `group_flags.json`：`/群聊 接话关` 的群判官在规则/LLM 之前整体短路（连召唤词也不接，与 peer 的 @ 拦截同口径），判官 token 零浪费；2026-11-21 加 `_mark_judge_wake`：判官放行（含概率兜底）时给 event 打 `vision_judge_wake` 标，vision_context 据此只在消息谈图时才注入历史图描述（召唤词直通/必答规则/艾特不打标，注入行为不变）；同日第三方判官 `recent_max` clamp 8→30、本地判官硬编码 8 条→12 条（配套 `judge.json`/`judge_api.json` 的「未知全貌不随意发言，看未判别的这几条」规则）；同日 API 判官支持 `?`=看不懂：框架取更早 12 条重判一次（跳缓存），仍 `?` 则放行并给主模型注入「看不懂就问」提示（`_judge_with_followup` / `_earlier_context` / `_all_records` 滚动缓冲）；同日加 `main_budget_exhausted()`：读 `api_mode.json` 今日用量，主对话额度耗尽（apimode 已拦死主动回复）时判官在条数限制后短路跳过、不花判官 token，召唤词直通不受影响，缺账本 fail-open；同日晚开关重命名：`reply_at`(接话)→`auto_chat`(主动冒泡)、`proactive`(主动发言)→`warmup`(热群)，旧键读取时自动映射，`need_active_reply` 短路改判 `auto_chat`；`main_budget_exhausted(group_id)` 加可选群号，分群额度耗尽也跳过判官 |
 | `builtin_stars\astrbot\main.py` | 主动接话缺会话时自动创建；`on_llm_response` 记录 bot 最近一句给第三方判官 |
 | `builtin_stars\astrbot\main.py` | `GeneratorExit` 不算错误（stop 事件时不再刷红字） |
 | `core\updater.py` | 禁止自动升级（`LOCAL_UPDATES_DISABLED`），保护上面 5 处补丁 |

@@ -232,10 +232,11 @@ _group_flags_cache: dict = {"mtime": 0.0, "data": {}}
 
 
 def load_group_flags() -> dict:
-    """Read access 插件的群开关，mtime 缓存。缺文件/缺群 = 接话默认开。
+    """Read access 插件的群开关，mtime 缓存。缺文件/缺群 = 主动冒泡默认开。
 
     Returns:
-        ``{gid: {"proactive": bool, "reply_at": bool, "welcome": bool}}``。
+        ``{gid: {"auto_chat": bool, "warmup": bool, "welcome": bool}}``。
+        旧键 reply_at/proactive 归一到新键（auto_chat/warmup）。
     """
     global _group_flags_cache
     try:
@@ -248,10 +249,19 @@ def load_group_flags() -> dict:
         raw = json.loads(GROUP_FLAGS_PATH.read_text(encoding="utf-8"))
     except (json.JSONDecodeError, OSError):
         return _group_flags_cache["data"]
+    defaults = {"auto_chat": True, "warmup": False, "welcome": False}
+    alias = {"reply_at": "auto_chat", "proactive": "warmup"}
     data = {}
     for gid, conf in (raw.get("groups") or {}).items():
         if isinstance(conf, dict):
-            data[str(gid)] = conf
+            entry = dict(defaults)
+            for key in defaults:
+                if key in conf:
+                    entry[key] = bool(conf[key])
+            for old, new in alias.items():
+                if new not in conf and old in conf:
+                    entry[new] = bool(conf[old])
+            data[str(gid)] = entry
     _group_flags_cache = {"mtime": stat.st_mtime, "data": data}
     return data
 
@@ -604,11 +614,12 @@ API_MODE_PATH = Path(r"D:\QQNTBOT\data\api_mode.json")
 _main_budget_cache: dict = {"mtime": 0.0, "data": None}
 
 
-def main_budget_exhausted() -> bool:
-    """True when the main dialogue daily token budget is used up today.
+def main_budget_exhausted(group_id: str = "") -> bool:
+    """True when the main dialogue daily budget (global or this group) is spent.
 
-    Fails open (returns False) when the ledger is missing/unreadable, so a
-    broken file never silences the judge by accident.
+    Pass ``group_id`` to also honour the per-group limit in api_mode.json.
+    Fails open (False) when the ledger is missing/unreadable so a broken file
+    never silences the judge by accident.
     """
     global _main_budget_cache
     try:
@@ -627,8 +638,19 @@ def main_budget_exhausted() -> bool:
     today = datetime.datetime.now().strftime("%Y%m%d")
     if used.get("date") != today:
         return False
+    # 全局硬上限
     limit = int(data.get("daily_limit") or 0)
-    return bool(limit and int(used.get("tokens") or 0) >= limit)
+    if limit and int(used.get("tokens") or 0) >= limit:
+        return True
+    # 分群额度（本群配了才判）
+    if group_id:
+        glimits = data.get("group_limits") or {}
+        if group_id in glimits:
+            glimit = int(glimits.get(group_id) or 0)
+            gused = int((used.get("groups") or {}).get(group_id) or 0)
+            if glimit and gused >= glimit:
+                return True
+    return False
 
 
 def _record_text(record) -> str:
@@ -785,11 +807,12 @@ class GroupChatContext:
         if load_autoreply_config().get(group_id) is False:
             logger.debug(f"active_reply disabled for group {group_id}")
             return False
-        # /群聊 接话关（access 插件 group_flags.json）：判官整体短路，
-        # 连召唤词也不放行——接话关就是关，喊名字也不接（@ 走 peer 闸门同规则）
+        # /群聊 冒泡关（access 插件 group_flags.json，旧名 reply_at/接话关）：
+        # 主动冒泡总闸——判官整体短路，连召唤词也不放行（@ 走 peer 闸门同规则）。
+        # 这是本项目的特色开关，只管"判官选择性接话"，与热群(warmup)无关。
         flags = load_group_flags().get(group_id)
-        if flags is not None and flags.get("reply_at") is False:
-            logger.info(f"group judge | 接话关({group_id}) | {(event.message_str or '')[:30]}")
+        if flags is not None and flags.get("auto_chat") is False:
+            logger.info(f"group judge | 冒泡关({group_id}) | {(event.message_str or '')[:30]}")
             return False
         if cfg["ar_whitelist"] and (
             event.unified_msg_origin not in cfg["ar_whitelist"]
@@ -974,10 +997,10 @@ class GroupChatContext:
                 logger.info(f"group judge | 条数限制({used})前置拦截 | {message[:30]}")
                 return False
 
-        # 4.5) 主对话额度耗尽 → apimode 已拦死所有主动回复，判官再判也发不出，
+        # 4.5) 主对话额度耗尽（全局或本群）→ apimode 已拦死主动回复，判官再判也发不出，
         #       白烧判官 token。召唤词直通在上面已 return，不受影响。
-        if main_budget_exhausted():
-            logger.info(f"group judge | 主对话额度耗尽，判官跳过 | {message[:30]}")
+        if main_budget_exhausted(str(event.get_group_id() or "")):
+            logger.info(f"group judge | 主对话额度耗尽(全局或本群)，判官跳过 | {message[:30]}")
             return False
 
         for kw in api_cfg["ignore"]:

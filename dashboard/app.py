@@ -1101,7 +1101,8 @@ def read_guard() -> dict:
         state = {}
     state.setdefault("review_groups", {})
     state.setdefault("daily_limit", 200000)
-    state.setdefault("used", {"date": "", "tokens": 0})
+    state.setdefault("group_limits", {})
+    state.setdefault("used", {"date": "", "tokens": 0, "groups": {}})
     state.setdefault("save_token", True)
     state.setdefault("history_keep", 10)
     state["mode"] = api_mode()
@@ -1286,6 +1287,7 @@ def get_guard() -> JSONResponse:
             "groups": groups,
             "review_groups": state.get("review_groups", {}),
             "daily_limit": state.get("daily_limit", 0),
+            "group_limits": state.get("group_limits", {}),
             "used": state.get("used", {}),
             "save_token": bool(state.get("save_token", True)),
             "history_keep": int(state.get("history_keep", 10)),
@@ -1309,6 +1311,15 @@ async def save_guard(request: Request) -> JSONResponse:
             state["daily_limit"] = max(0, int(body["daily_limit"]))
         except (TypeError, ValueError):
             return JSONResponse({"ok": False, "msg": "额度必须是数字"})
+    if "group_limits" in body and isinstance(body["group_limits"], dict):
+        # gid -> 额度（0 或缺失 = 跟随全局）；合并写入，不覆盖未提及的群
+        gl = dict(state.get("group_limits") or {})
+        for k, v in body["group_limits"].items():
+            try:
+                gl[str(k)] = max(0, int(v))
+            except (TypeError, ValueError):
+                return JSONResponse({"ok": False, "msg": f"群 {k} 额度必须是数字"})
+        state["group_limits"] = gl
     if "save_token" in body:
         state["save_token"] = bool(body["save_token"])
     if "history_keep" in body:
@@ -1470,8 +1481,28 @@ async def save_water(request: Request) -> JSONResponse:
 GROUP_FLAGS_FILE = (
     PLUGIN_DIR / "astrbot_plugin_access" / "group_flags.json"
 )
-GROUP_FLAG_DEFAULTS = {"proactive": False, "reply_at": True, "welcome": False}
-FLAG_NAMES = {"proactive": "主动发言", "reply_at": "接话", "welcome": "进群提醒"}
+# 两类主动分开：auto_chat=主动冒泡(无唤醒词选择性聊天,主特色,默认开)，
+# warmup=热群(冷场发预设暖场话,默认关)。旧键 reply_at/proactive 做兼容映射。
+GROUP_FLAG_DEFAULTS = {"auto_chat": True, "warmup": False, "welcome": False}
+FLAG_NAMES = {
+    "auto_chat": "主动冒泡（选择性聊天）",
+    "warmup": "热群（冷场暖场话）",
+    "welcome": "进群提醒",
+}
+FLAG_KEY_ALIAS = {"reply_at": "auto_chat", "proactive": "warmup"}
+
+
+def _normalize_flag_entry(conf: dict) -> dict:
+    entry = dict(GROUP_FLAG_DEFAULTS)
+    if not isinstance(conf, dict):
+        return entry
+    for key in GROUP_FLAG_DEFAULTS:
+        if key in conf:
+            entry[key] = bool(conf[key])
+    for old, new in FLAG_KEY_ALIAS.items():
+        if new not in conf and old in conf:
+            entry[new] = bool(conf[old])
+    return entry
 
 
 def _welcome_text() -> str:
@@ -1493,24 +1524,20 @@ def _welcome_text() -> str:
 
 @app.get("/api/group_flags")
 def get_group_flags() -> JSONResponse:
-    """Per-group proactive/reply/welcome switches (defaults match access)."""
+    """Per-group auto_chat/warmup/welcome switches (defaults match access)."""
     saved = (read_json(GROUP_FLAGS_FILE, {"groups": {}}).get("groups")) or {}
     rows = []
     seen = set()
     for gid in read_access()["groups"]:
-        conf = saved.get(gid) if isinstance(saved.get(gid), dict) else {}
         row = {"id": gid, "whitelisted": True}
-        for key, default in GROUP_FLAG_DEFAULTS.items():
-            row[key] = bool(conf.get(key, default)) if isinstance(conf, dict) else default
+        row.update(_normalize_flag_entry(saved.get(gid)))
         rows.append(row)
         seen.add(gid)
     for item in known_groups():
         if item["id"] in seen:
             continue
-        conf = saved.get(item["id"]) if isinstance(saved.get(item["id"]), dict) else {}
         row = {"id": item["id"], "whitelisted": False}
-        for key, default in GROUP_FLAG_DEFAULTS.items():
-            row[key] = bool(conf.get(key, default)) if isinstance(conf, dict) else default
+        row.update(_normalize_flag_entry(saved.get(item["id"])))
         rows.append(row)
     return JSONResponse({"items": rows, "flag_names": FLAG_NAMES, "welcome_text": _welcome_text()})
 
@@ -1526,8 +1553,7 @@ async def save_group_flags(request: Request) -> JSONResponse:
         gid = str(item.get("id", "")).strip()
         if not gid.isdigit():
             continue
-        entry = dict(groups.get(gid)) if isinstance(groups.get(gid), dict) else {}
-        entry.update(dict(GROUP_FLAG_DEFAULTS))
+        entry = _normalize_flag_entry(groups.get(gid))
         for key in GROUP_FLAG_DEFAULTS:
             if key in item:
                 entry[key] = bool(item[key])
