@@ -707,6 +707,19 @@ class GroupChatContext:
         )
         return response.completion_text
 
+    @staticmethod
+    def _mark_judge_wake(event: AstrMessageEvent) -> None:
+        """标记这次回复是判官触发的主动接话（非召唤词/必答规则/艾特）。
+
+        vision_context 据此收紧图描述注入：判官不看图也没人叫它，主动
+        接话时只有当前这条话真的在谈图才需要历史图描述，否则 15 分钟
+        前的图描述会被硬塞进一段无关闲聊里。
+        """
+        try:
+            event.set_extra("vision_judge_wake", True)
+        except Exception:  # noqa: BLE001 - extra 只是提示信息，失败不影响主流程
+            pass
+
     async def need_active_reply(self, event: AstrMessageEvent) -> bool:
         cfg = self.cfg(event)
         if not cfg["enable_active_reply"]:
@@ -759,7 +772,10 @@ class GroupChatContext:
 
         match cfg["ar_method"]:
             case "possibility_reply":
-                return random.random() < cfg["ar_possibility"]
+                hit = random.random() < cfg["ar_possibility"]
+                if hit:
+                    self._mark_judge_wake(event)
+                return hit
             case "judge":
                 if not await self._judge_reply(event, cfg):
                     return False
@@ -771,6 +787,7 @@ class GroupChatContext:
                 chance = load_reply_chance()
                 if chance >= 1.0 or random.random() < chance:
                     self._note_reply(event.unified_msg_origin)
+                    self._mark_judge_wake(event)
                     return True
                 logger.info(f"group judge | 概率闸拦截 (chance={chance:.2f}) | {event.message_str[:30]}")
                 return False
@@ -957,6 +974,7 @@ class GroupChatContext:
             if random.random() < api_cfg["fallback_chance"]:
                 self._mark_trigger(umo, message, api_cfg)
                 self._mark_burst(umo, "answered", api_cfg)
+                self._mark_judge_wake(event)
                 return True
             return False
 
@@ -972,6 +990,7 @@ class GroupChatContext:
             if random.random() < api_cfg["fallback_chance"]:
                 self._mark_trigger(umo, message, api_cfg)
                 self._mark_burst(umo, "answered", api_cfg)
+                self._mark_judge_wake(event)
                 return True
             return False
         if not verdict:
@@ -987,6 +1006,7 @@ class GroupChatContext:
             return False
         self._mark_trigger(umo, message, api_cfg)
         self._mark_burst(umo, "answered", api_cfg)
+        self._mark_judge_wake(event)
         return True
 
     async def _judge_api(
