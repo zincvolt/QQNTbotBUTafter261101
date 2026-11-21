@@ -384,3 +384,14 @@ pattern = r"。(?=\s|$|[（(\[【「『])"
 - 反过来也成立：`after_message_sent` 这种"真实世界发生了"的钩子，比任何估算都可靠。能挂到真实信号就别猜时间。
 
 **顺带一个估算原则**：用时间做锁时，**取上沿不取均值**。均值意味着有一半概率提前放手；上沿只会多锁一会儿，而"多锁一会儿"有真实信号来收敛，"提前放手"没有任何东西能补救。
+
+## 19. 带 BOM 的配置文件：json.loads 静默变空
+
+AstrBot 自己写出的 json 配置（`cmd_config.json`、`astrbot_plugin_access_config.json`）带 UTF-8 BOM。任何用 `read_text(encoding="utf-8")`（不带 `-sig`）读它们的地方，`json.loads` 直接抛 `JSONDecodeError`——而如果调用处裹了 `try/except return []`，名单就静默变空，功能照常跑但判定全靠兜底路径。
+
+**实际后果**：`unified_perm.py` 的 super_admins/admins 名单在生产上从未生效过（一直靠 `event.role == "admin"` 兜底），外部插件 import 它做的管理判定全是坏的。修法是 `encoding="utf-8-sig"`，一行改两处（access v2.1.1）。
+
+**通用教训**：
+- 读 AstrBot 框架写出的任何 json，一律 `utf-8-sig`；读插件自己 `json.dumps` 写的文件才可以用裸 `utf-8`。
+- `try/except return 空` 是双刃剑：功能不炸但判定悄悄失效。给这类兜底加一条启动日志（`warning: read failed`），空名单比错名单更危险。
+- 排查「权限判定时灵时不灵」时，先查配置文件 BOM，再查代码。
