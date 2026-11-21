@@ -177,6 +177,32 @@
   </div>
 
   <div class="panel">
+    <h2>全账户 Token 用量 <span class="meta" id="usageDate">今日</span></h2>
+    <div class="hint" style="margin-bottom:10px">四路合计（主对话 + 判官 + 识图补描述 + 记忆抽取），对齐 DeepSeek 开放平台账单。本地模型推理不计入。</div>
+    <div id="usageRows" style="display:grid;gap:8px"><div class="empty">加载中…</div></div>
+    <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center">
+      <span>今日合计</span><b id="usageTotal" style="font-size:16px">–</b>
+    </div>
+    <div class="two" style="margin-top:14px">
+      <div>
+        <label>识图补描述 · 日额度</label>
+        <input id="usageVisionLimit" type="number" min="0" step="1000">
+      </div>
+      <div>
+        <label>记忆抽取 · 日额度</label>
+        <input id="usageLtmLimit" type="number" min="0" step="1000">
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:10px;flex-wrap:wrap">
+      <button class="primary" onclick="saveTokenUsage()">保存额度</button>
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" id="usageVisionEnabled" style="width:auto"> 识图补描述启用</label>
+      <label style="display:flex;align-items:center;gap:5px;font-size:12px"><input type="checkbox" id="usageLtmEnabled" style="width:auto"> 记忆抽取启用</label>
+      <span class="hint" id="usageMsg"></span>
+    </div>
+    <div class="hint" style="margin-top:8px">主对话额度在「系统」页改，判官额度在「判官」页改（两处独立）。超额后：识图跳过补描述（按需发原图兜底）、记忆抽取暂停本轮、判官在主对话额度耗尽时整体跳过。</div>
+  </div>
+
+  <div class="panel">
     <h2>系统状态</h2>
     <div class="bars">
       <div>
@@ -1015,6 +1041,7 @@ const LTM_OFF = new Set(['model', 'vl', 'ocr']);
 
 async function refresh() {
   try {
+    loadTokenUsage();
     const st = await (await fetch('/api/status')).json();
     renderPills(st);
     renderMode(st);
@@ -1551,6 +1578,59 @@ async function loadGuard() {
   } catch (e) { console.error('loadGuard', e); }
 }
 
+let usageInputsLoaded = false;
+const USAGE_LABELS = {main: '主对话', judge: '判官', vision: '识图补描述', ltm: '记忆抽取'};
+function fmtTokens(n) { return Number(n || 0).toLocaleString('en-US'); }
+
+async function loadTokenUsage() {
+  try {
+    const r = await (await fetch('/api/token_usage?t=' + Date.now())).json();
+    const parts = r.parts || {};
+    document.getElementById('usageDate').textContent = '今日 ' + (r.date || '');
+    document.getElementById('usageRows').innerHTML = Object.keys(USAGE_LABELS).map(k => {
+      const p = parts[k] || {};
+      const used = p.tokens || 0, lim = p.limit || 0;
+      const pct = lim ? Math.min(100, Math.round(used / lim * 100)) : 0;
+      const over = lim && used >= lim;
+      const color = over ? '#e05252' : (pct >= 80 ? '#e0a340' : 'var(--accent)');
+      const state = p.enabled === false ? ' <span class="meta">已关闭</span>' : (over ? ' <span style="color:#e05252">已超额</span>' : '');
+      return `<div>
+        <div class="bar-label"><span>${USAGE_LABELS[k]}${state}</span><span>${fmtTokens(used)} / ${fmtTokens(lim)} (${pct}%)</span></div>
+        <div class="bar"><i style="width:${pct}%;background:${color}"></i></div>
+      </div>`;
+    }).join('');
+    document.getElementById('usageTotal').textContent = fmtTokens(r.total) + ' tokens';
+    if (!usageInputsLoaded) {
+      document.getElementById('usageVisionLimit').value = (parts.vision || {}).limit || 0;
+      document.getElementById('usageLtmLimit').value = (parts.ltm || {}).limit || 0;
+      document.getElementById('usageVisionEnabled').checked = (parts.vision || {}).enabled !== false;
+      document.getElementById('usageLtmEnabled').checked = (parts.ltm || {}).enabled !== false;
+      usageInputsLoaded = true;
+    }
+  } catch (e) { console.error('loadTokenUsage', e); }
+}
+
+async function saveTokenUsage() {
+  const body = {
+    vision: {
+      daily_limit: parseInt(document.getElementById('usageVisionLimit').value || '0', 10),
+      enabled: document.getElementById('usageVisionEnabled').checked
+    },
+    ltm: {
+      daily_limit: parseInt(document.getElementById('usageLtmLimit').value || '0', 10),
+      enabled: document.getElementById('usageLtmEnabled').checked
+    }
+  };
+  try {
+    const r = await (await fetch('/api/token_usage', {
+      method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body)
+    })).json();
+    document.getElementById('usageMsg').textContent = r.msg || (r.ok ? '已保存' : '保存失败');
+    usageInputsLoaded = false;
+    loadTokenUsage();
+  } catch (e) { document.getElementById('usageMsg').textContent = '保存失败：' + e; }
+}
+
 async function saveGuardConfig() {
   const review = {};
   document.querySelectorAll('.reviewPick').forEach(c => { review[c.dataset.gid] = c.checked; });
@@ -1884,6 +1964,7 @@ loadPlugins();
 loadLtmPrompt();
 loadLtmSettings();
 loadProfile();
+loadTokenUsage();
 setInterval(refresh, 5000);
 </script>
 </body>

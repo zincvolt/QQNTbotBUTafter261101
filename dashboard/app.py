@@ -1321,6 +1321,94 @@ async def save_guard(request: Request) -> JSONResponse:
     return JSONResponse({"ok": True, "msg": "已保存（立即生效）"})
 
 
+# ---- 全账户 token 用量 ----
+# 四路各自记账（互不干扰），这里做汇总视图。
+# main  → data/api_mode.json  used.tokens + daily_limit
+# judge → data/judge_api.json used.tokens + daily_limit
+# vision→ data/vision_usage.json（vision 插件写）
+# ltm   → data/ltm_usage.json（ltm 插件写）
+VISION_USAGE = ROOT / "data" / "vision_usage.json"
+LTM_USAGE = ROOT / "data" / "ltm_usage.json"
+AUX_DEFAULT = lambda: {"date": "", "tokens": 0, "daily_limit": 100000, "enabled": True}
+
+
+def _aux_usage(path: Path) -> dict:
+    d = read_json(path, AUX_DEFAULT())
+    for k, v in AUX_DEFAULT().items():
+        d.setdefault(k, v)
+    if d.get("date") != datetime.now().strftime("%Y%m%d"):
+        d["date"] = datetime.now().strftime("%Y%m%d")
+        d["tokens"] = 0
+    return d
+
+
+@app.get("/api/token_usage")
+def get_token_usage() -> JSONResponse:
+    """Aggregate all four token ledgers into one view (today only)."""
+    today = datetime.now().strftime("%Y%m%d")
+    main = read_guard()
+    main_used = main.get("used") or {}
+    judge = read_json(JUDGE_API_FILE, {})
+    judge_used = judge.get("used") or {}
+    vision = _aux_usage(VISION_USAGE)
+    ltm = _aux_usage(LTM_USAGE)
+
+    parts = {
+        "main": {
+            "tokens": int(main_used.get("tokens") or 0) if main_used.get("date") == today else 0,
+            "limit": int(main.get("daily_limit") or 0),
+            "enabled": True,
+        },
+        "judge": {
+            "tokens": int(judge_used.get("tokens") or 0) if judge_used.get("date") == today else 0,
+            "limit": int(judge.get("daily_limit") or 0),
+            "enabled": bool(judge.get("enable", True)),
+        },
+        "vision": {
+            "tokens": int(vision.get("tokens") or 0),
+            "limit": int(vision.get("daily_limit") or 0),
+            "enabled": bool(vision.get("enabled", True)),
+        },
+        "ltm": {
+            "tokens": int(ltm.get("tokens") or 0),
+            "limit": int(ltm.get("daily_limit") or 0),
+            "enabled": bool(ltm.get("enabled", True)),
+        },
+    }
+    return JSONResponse({
+        "date": today,
+        "parts": parts,
+        "total": sum(p["tokens"] for p in parts.values()),
+        "total_limit": sum(p["limit"] for p in parts.values()),
+    })
+
+
+@app.post("/api/token_usage")
+async def save_token_usage(request: Request) -> JSONResponse:
+    """Update the daily limits / switches for the vision and ltm ledgers.
+
+    main/judge limits are edited through /api/guard and /api/judge/api —
+    this endpoint only owns the two auxiliary ledgers to avoid double writes.
+    """
+    body = await request.json()
+    changed = []
+    for name, path in (("vision", VISION_USAGE), ("ltm", LTM_USAGE)):
+        if name not in body or not isinstance(body[name], dict):
+            continue
+        d = _aux_usage(path)
+        cfg = body[name]
+        if "daily_limit" in cfg:
+            try:
+                d["daily_limit"] = max(0, min(10_000_000, int(cfg["daily_limit"])))
+            except (TypeError, ValueError):
+                return JSONResponse({"ok": False, "msg": f"{name} 额度必须是数字"})
+        if "enabled" in cfg:
+            d["enabled"] = bool(cfg["enabled"])
+        write_json(path, d)
+        changed.append(name)
+    return JSONResponse({"ok": True, "msg": f"已保存：{', '.join(changed) or '无变更'}（立即生效）"})
+
+
 @app.get("/api/water")
 def get_water() -> JSONResponse:
     """Return per-group watering settings merged with known groups."""

@@ -597,6 +597,40 @@ def is_third_party_mode() -> bool:
     return "deepseek" in current_provider_id().lower()
 
 
+# 主对话每日额度：判官绑定它——额度耗尽、主动回复已被 apimode 拦死时，
+# 判官再判也没有意义（判完也发不出回复），还白烧判官的 token。
+# 直接读 api_mode.json 的 used/daily_limit，mtime 缓存（与 watch 循环同口径）。
+API_MODE_PATH = Path(r"D:\QQNTBOT\data\api_mode.json")
+_main_budget_cache: dict = {"mtime": 0.0, "data": None}
+
+
+def main_budget_exhausted() -> bool:
+    """True when the main dialogue daily token budget is used up today.
+
+    Fails open (returns False) when the ledger is missing/unreadable, so a
+    broken file never silences the judge by accident.
+    """
+    global _main_budget_cache
+    try:
+        stat = API_MODE_PATH.stat()
+    except OSError:
+        return False
+    if _main_budget_cache["data"] is not None and stat.st_mtime == _main_budget_cache["mtime"]:
+        data = _main_budget_cache["data"]
+    else:
+        try:
+            data = json.loads(API_MODE_PATH.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        _main_budget_cache = {"mtime": stat.st_mtime, "data": data}
+    used = data.get("used") or {}
+    today = datetime.datetime.now().strftime("%Y%m%d")
+    if used.get("date") != today:
+        return False
+    limit = int(data.get("daily_limit") or 0)
+    return bool(limit and int(used.get("tokens") or 0) >= limit)
+
+
 def _record_text(record) -> str:
     """Strip the ``[nickname/time]: `` prefix from a stored group message."""
     return re.sub(r"^\[[^\]]*\]:\s*", "", str(record)).strip()
@@ -939,6 +973,12 @@ class GroupChatContext:
             if over:
                 logger.info(f"group judge | 条数限制({used})前置拦截 | {message[:30]}")
                 return False
+
+        # 4.5) 主对话额度耗尽 → apimode 已拦死所有主动回复，判官再判也发不出，
+        #       白烧判官 token。召唤词直通在上面已 return，不受影响。
+        if main_budget_exhausted():
+            logger.info(f"group judge | 主对话额度耗尽，判官跳过 | {message[:30]}")
+            return False
 
         for kw in api_cfg["ignore"]:
             if kw and kw in message:
