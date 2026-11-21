@@ -3,7 +3,7 @@
   "api_base": "https://api.deepseek.com/v1",
   "api_key": "sk-90c44ddf8a074b2fb2c7c2387b017fbd",
   "model": "deepseek-flash",
-  "prompt": "群聊接话判定：最后一条要不要回。\n- @它、叫它名字、追问或纠正它 → 1\n- 向它提问、倾诉、求助 → 1\n- 别人互聊、说自己的安排、与它无关 → 0\n- 骂人、复读、纯表情、尖叫 → 0\n- 不了解事情全貌（只看到片段）→ 0，不要随意发言；判断前先看完最近这 12 条聊天记录，看完仍不明白就 0\n\n最近：\n{recent}\n\n它刚说：{last_bot}\n\n新消息：{message}\n\n只回 1 或 0。",
+  "prompt": "群聊接话判定：最后一条要不要回。\n- @它、叫它名字、追问或纠正它 → 1\n- 向它提问、倾诉、求助 → 1\n- 别人互聊、说自己的安排、与它无关 → 0\n- 骂人、复读、纯表情、尖叫 → 0\n- 不了解事情全貌（只看到片段）→ 不要随意发言；判断前先看完「最近」这几条还没判别的消息，能看出与自己无关就 0，完全看不懂他们在说啥就 ?\n\n最近：\n{recent}\n\n它刚说：{last_bot}\n\n新消息：{message}\n\n只回 1 / 0 / ?（?=上下文不足看不懂）。",
   "recent_max": 12,
   "recent_chars": 250,
   "include_last_bot": true,
@@ -17,7 +17,7 @@
   "daily_limit": 50000,
   "used": {
     "date": "20261121",
-    "tokens": 14564
+    "tokens": 17751
   },
   "ignore": [],
   "force_reply": [],

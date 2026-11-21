@@ -1609,6 +1609,7 @@ def get_judge() -> JSONResponse:
         JUDGE_FILE, {"prompt": DEFAULT_JUDGE_PROMPT, "ignore": [], "force_reply": []}
     )
     data.setdefault("prompt", DEFAULT_JUDGE_PROMPT)
+    data.setdefault("recent_max", 12)
     data.setdefault("ignore", [])
     data.setdefault("force_reply", [])
     return JSONResponse(data)
@@ -1626,6 +1627,7 @@ async def save_judge(request: Request) -> JSONResponse:
     data.update(
         {
             "prompt": prompt,
+            "recent_max": min(30, max(1, int(body.get("recent_max") or 12))),
             "ignore": [str(x).strip() for x in body.get("ignore", []) if str(x).strip()],
             "force_reply": [
                 str(x).strip() for x in body.get("force_reply", []) if str(x).strip()

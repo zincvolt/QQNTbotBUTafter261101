@@ -367,6 +367,12 @@
     <textarea id="judgePrompt" rows="9" placeholder="加载中…"></textarea>
     <div class="two" style="margin-top:12px">
       <div>
+        <label>最近上下文条数（未判别的消息）</label>
+        <input id="judgeRecent" type="number" min="1" max="30" step="1">
+      </div>
+    </div>
+    <div class="two" style="margin-top:12px">
+      <div>
         <label>必答关键词（命中就直接回，每行一个）</label>
         <textarea id="judgeForce" rows="4" placeholder="bot"></textarea>
       </div>
@@ -452,7 +458,7 @@
     <div class="two" style="margin-top:12px">
       <div>
         <label>最近上下文条数</label>
-        <input id="jaRecent" type="number" min="1" max="8" step="1">
+        <input id="jaRecent" type="number" min="1" max="30" step="1">
       </div>
       <div>
         <label>判官日限额（tokens，0=不限）</label>
@@ -1247,6 +1253,7 @@ async function savePersona() {
 async function loadJudge() {
   const j = await (await fetch('/api/judge')).json();
   document.getElementById('judgePrompt').value = j.prompt || '';
+  document.getElementById('judgeRecent').value = j.recent_max ?? 12;
   document.getElementById('judgeForce').value = (j.force_reply || []).join('\n');
   document.getElementById('judgeIgnore').value = (j.ignore || []).join('\n');
   loadJudgeApi();
@@ -1351,6 +1358,7 @@ async function saveJudge() {
     method:'POST', headers:{'Content-Type':'application/json'},
     body: JSON.stringify({
       prompt: document.getElementById('judgePrompt').value,
+      recent_max: Number(document.getElementById('judgeRecent').value) || 12,
       force_reply: lines('judgeForce'),
       ignore: lines('judgeIgnore')
     })

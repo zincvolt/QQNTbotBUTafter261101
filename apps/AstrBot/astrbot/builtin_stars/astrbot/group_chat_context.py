@@ -411,6 +411,7 @@ def load_judge_config() -> dict:
         prompt = DEFAULT_JUDGE_PROMPT
     data = {
         "prompt": prompt,
+        "recent_max": _as_int(raw.get("recent_max"), 12, 1, 30),
         "ignore": [str(x).strip() for x in raw.get("ignore", []) if str(x).strip()],
         "force_reply": [
             str(x).strip() for x in raw.get("force_reply", []) if str(x).strip()
@@ -601,6 +602,19 @@ def _record_text(record) -> str:
     return re.sub(r"^\[[^\]]*\]:\s*", "", str(record)).strip()
 
 
+def _parse_verdict(content: str) -> bool | str:
+    """Parse the judge's one-token answer.
+
+    ``"?"`` is a distinct answer meaning "context insufficient" — the caller
+    will fetch earlier messages and ask once more, then let the main model
+    ask the group what they are talking about if still unclear.
+    """
+    answer = (content or "").strip()
+    if answer.startswith(("?", "？")):
+        return "?"
+    return answer.startswith("1")
+
+
 def _similarity(left: str, right: str) -> float:
     """Character-level similarity of two short messages (0.0 - 1.0).
 
@@ -624,6 +638,11 @@ class GroupChatContext:
         self.context = context
         self._locks: dict[str, asyncio.Lock] = {}
         self.raw_records: dict[str, deque[str]] = defaultdict(deque)
+        # 追文缓冲：raw_records 在喂给主模型后会把旧消息清掉，判官回「?」时
+        # 需要再看更早的几条；这里另留一份滚动全量（每群 60 条，纯内存）。
+        self._all_records: dict[str, deque[str]] = defaultdict(
+            lambda: deque(maxlen=60)
+        )
         self._record_ids: dict[str, deque[str]] = defaultdict(deque)
         self._record_times: dict[str, deque[float]] = defaultdict(deque)
         self._reply_times: dict[str, deque[float]] = defaultdict(deque)
@@ -978,12 +997,8 @@ class GroupChatContext:
                 return True
             return False
 
-        verdict = await self._judge_api(
-            umo,
-            message,
-            records,
-            api_cfg,
-            insult=self._insult_hit(message, api_cfg),
+        verdict = await self._judge_with_followup(
+            event, umo, message, records, api_cfg
         )
         if verdict is None:
             # 失败/超限/熔断：概率兜底，不硬中断（也不标记话段，等下次重试）
@@ -1009,6 +1024,62 @@ class GroupChatContext:
         self._mark_judge_wake(event)
         return True
 
+    async def _judge_with_followup(
+        self, event, umo: str, message: str, records: list, api_cfg: dict
+    ) -> bool | None:
+        """Judge once; on ``?`` fetch earlier messages and ask once more.
+
+        A second ``?`` means the judge genuinely cannot follow the group. Let
+        the bot reply and mark the event so the main model is told to ask what
+        they are talking about instead of bluffing an answer.
+        """
+        insult = self._insult_hit(message, api_cfg)
+        verdict = await self._judge_api(
+            umo, message, records, api_cfg, insult=insult
+        )
+        if verdict == "?":
+            earlier = self._earlier_context(umo, records, api_cfg)
+            logger.info(
+                f"group judge | 判官要看更早的上下文，追 "
+                f"{len(earlier.splitlines())} 条再判 | {message[:30]}"
+            )
+            verdict = await self._judge_api(
+                umo,
+                message,
+                records,
+                api_cfg,
+                insult=insult,
+                earlier=earlier,
+                skip_cache=True,
+            )
+            if verdict == "?":
+                logger.info(
+                    f"group judge | 追文后仍看不懂，放行让主模型主动问 "
+                    f"| {message[:30]}"
+                )
+                event.set_extra("judge_unknown", True)
+                verdict = True
+        return verdict
+
+    def _earlier_context(self, umo: str, records: list, api_cfg: dict) -> str:
+        """Build the extra context for a second judge pass.
+
+        ``raw_records`` only holds messages that have not been fed to the main
+        model yet; the full rolling buffer keeps older ones. Take up to 12
+        messages immediately before the current unjudged batch.
+        """
+        all_records = list(self._all_records.get(umo, ()))
+        cut = max(0, len(all_records) - len(records))
+        lines = []
+        for item in all_records[max(0, cut - 12) : cut]:
+            text = _record_text(item)
+            if not text:
+                continue
+            if len(text) > api_cfg["recent_chars"]:
+                text = text[: api_cfg["recent_chars"]] + "…"
+            lines.append(text)
+        return "\n".join(lines) or "(没有更早的消息)"
+
     async def _judge_api(
         self,
         umo: str,
@@ -1016,25 +1087,32 @@ class GroupChatContext:
         records: list,
         api_cfg: dict,
         insult: bool = False,
-    ) -> bool | None:
+        earlier: str = "",
+        skip_cache: bool = False,
+    ) -> bool | str | None:
         """Ask the third-party judge model with a minimal prompt.
 
         Args:
             umo: Unified message origin.
             message: Incoming text.
-            records: Recent group records.
+            records: Recent (not yet judged) group records.
             api_cfg: Third-party judge profile.
             insult: The message contains a swear word; ask the judge to work out
                 who it is aimed at instead of guessing from rules.
+            earlier: Extra earlier messages for a second pass when the judge
+                answered ``?`` (cannot tell what the group is talking about).
+            skip_cache: Do not read/write the verdict cache (second pass must
+                actually call the model again).
 
         Returns:
-            True/False for the verdict, None when the call failed, was cooling
-            down, or hit the daily token cap (caller falls back to probability).
+            True/False for the verdict, ``"?"`` when the judge needs more
+            context, None when the call failed, was cooling down, or hit the
+            daily token cap (caller falls back to probability).
         """
         now = time.time()
         cache_key = (umo, message)
         cached = self._judge_cache_map.get(cache_key)
-        if cached and now - cached[0] <= api_cfg["cache_seconds"]:
+        if not skip_cache and cached and now - cached[0] <= api_cfg["cache_seconds"]:
             logger.info(f"group judge | API 缓存命中 | {message[:30]}")
             return cached[1]
         if now < self._judge_cooldown_until:
@@ -1090,6 +1168,10 @@ class GroupChatContext:
                     "\n\n注意：这句带脏话。只有明显在骂你（比如用「你」指向你）"
                     "才回 1；在骂群里其他人、跟你无关回 0。"
                 )
+        if earlier:
+            # 第一回答说「?」看不懂时的第二次判定：把更早的消息补上，
+            # 但最多 12 条 × recent_chars 字，别把 prompt 撑爆。
+            prompt += "\n\n更早的聊天（帮你弄清来龙去脉）：\n" + earlier + "\n"
         payload = {
             "model": model,
             "messages": [{"role": "user", "content": prompt}],
@@ -1109,9 +1191,9 @@ class GroupChatContext:
             usage = data.get("usage") or {}
             self._judge_usage_add(int(usage.get("total_tokens") or 0))
             content = (data["choices"][0]["message"].get("content") or "").strip()
-            verdict = content.startswith("1")
+            verdict = _parse_verdict(content)
             self._judge_fail = 0
-            if api_cfg["cache_seconds"] > 0:
+            if verdict != "?" and api_cfg["cache_seconds"] > 0:
                 self._judge_cache_map[cache_key] = (now, verdict)
                 self._trim_judge_cache()
             logger.info(
@@ -1533,7 +1615,7 @@ class GroupChatContext:
             logger.info(f"group judge | 过短不接 | {message[:20]}")
             return False
 
-        recent = list(self.raw_records.get(umo, []))[-12:]
+        recent = list(self.raw_records.get(umo, []))[-judge_cfg["recent_max"]:]
         context = "\n".join(str(r) for r in recent) or "(暂无更早消息)"
         prompt = judge_cfg["prompt"].replace("{recent}", context).replace(
             "{message}", message
@@ -1607,6 +1689,7 @@ class GroupChatContext:
             record_ids = self._record_ids[umo]
             record_id = uuid.uuid4().hex
             records.append(final_message)
+            self._all_records[umo].append(final_message)
             record_ids.append(record_id)
             times = self._record_times[umo]
             times.append(time.time())
@@ -1620,6 +1703,23 @@ class GroupChatContext:
 
     async def on_req_llm(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
         umo = event.unified_msg_origin
+        # 判官追文一次后仍回「?」：它看不懂这段对话，但这条消息被判为要接。
+        # 给主模型一句提示——需要上下文就直接问，别装懂硬答。同一事件在
+        # 工具循环里会多次进这个钩子，用 extra 标记保证只注入一次。
+        if (
+            event.get_extra("judge_unknown")
+            and not event.get_extra("_judge_unknown_hinted")
+            and event.get_message_type() == MessageType.GROUP_MESSAGE
+        ):
+            event.set_extra("_judge_unknown_hinted", True)
+            req.extra_user_content_parts.append(
+                TextPart(
+                    text="[你没看懂这段对话的来龙去脉：如果回答需要上下文，"
+                    "就直接问对方「你们在说啥」，别瞎猜硬答；"
+                    "如果这句话本身就能回，照常回。]"
+                )
+            )
+            logger.info("group judge | 已给主模型注入「看不懂就问」提示")
         # 在途硬锁：正在回复（生成中或分段发送中）时，@ 它 / 唤醒前缀也不放行。
         #
         # 为什么必须在这里挡：``need_active_reply`` 第一句就是
