@@ -36,7 +36,7 @@
 | 插件 | 用途 |
 |---|---|
 | [astrbot-plugin-basicz](https://github.com/zincvolt/astrbot-plugin-basicz) | 群聊基础行为层（原 peer）：人格渲染、发言闸门、注入/刷屏防护、读图闸、热群、表情后处理 |
-| astrbot-plugin-private_settle（本地） | 私聊话段合并：连发几条合成一条消息、只回一次，补上私聊缺失的判官等待层（不送判官） |
+| [astrbot-plugin-private-settle](https://github.com/zincvolt/astrbot-plugin-private-settle) | 私聊话段合并：连发几条合成一条消息、只回一次，补上私聊缺失的判官等待层（不送判官） |
 | [astrbot-plugin-access](https://github.com/zincvolt/astrbot-plugin-access) | 权限闸门：统一斜线指令鉴权、指令权限表在线编辑、主动回复冲突仲裁（附新插件指令管理/部署双指南） |
 | [astrbot-plugin-ltm](https://github.com/zincvolt/astrbot-plugin-ltm) | 长期记忆：抽取稳定事实、语义召回后注入提示词 |
 | [astrbot-plugin-apimode](https://github.com/zincvolt/astrbot-plugin-apimode) | 本地 / 第三方模型热切换、token 额度、按群审查 |

@@ -313,7 +313,8 @@ B、C 到达 → 文本/图片 append 进这一组，自己 stop_event 不回复
 - 被合并的消息不进对话历史，只有合并后一条落库；
 - 斜杠指令不参与合并、也不被本插件停掉，指令链路照常走；
 - 回复生成中到达的消息先排队（`inflight_wait`），避免各回一条；
-- 配置 `data/private_settle.json`，面板「判官 → 私聊话段合并」可调。
+- 配置 `data/private_settle.json`，面板「判官 → 私聊话段合并」可调；
+- 独立仓库：<https://github.com/zincvolt/astrbot-plugin-private-settle>（本地改动在运行目录，改完同步到 `D:\QQNTBOT-repos\astrbot-plugin-private-settle`）。
 
 细节（时序图、与指令/图片/历史的交互、表情策略、验证记录）见
 [PRIVATE-CHAT.md](PRIVATE-CHAT.md)。私聊表情策略在 `data/meme_dm.json`
