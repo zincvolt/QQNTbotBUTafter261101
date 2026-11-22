@@ -658,6 +658,32 @@
     </div>
     <div class="hint">「主动问」关着时，追文后还看不懂就直接不接——宁可装死，也不在群里反复刷「你们在说啥」。</div>
 
+    <h3 style="margin-top:18px">私聊话段等待（不送判官）</h3>
+    <div class="hint">群聊靠判官的「话段聚合」等用户说完；私聊必回复、整条判官链被跳过，所以由独立插件补这一层：连发多条只回最后一条，不消耗任何 token。</div>
+    <label style="display:flex;align-items:center;gap:10px;color:var(--text);margin-top:6px">
+      <input type="checkbox" id="dmEnable">
+      启用私聊话段等待
+    </label>
+    <label style="display:flex;align-items:center;gap:10px;color:var(--text);margin-top:10px">
+      <input type="checkbox" id="dmWhitelistOnly">
+      只对私聊白名单里的人生效（其他人不陪等）
+    </label>
+    <div class="two" style="margin-top:6px">
+      <div>
+        <label>静默等待秒数（期间又来消息就交给最新那条）</label>
+        <input id="dmSettle" type="number" min="0" max="15" step="0.5">
+      </div>
+      <div>
+        <label>上一条还在生成时最多排队秒数</label>
+        <input id="dmInflight" type="number" min="0" max="120" step="5">
+      </div>
+    </div>
+    <div class="hint">指令（/ 开头）和纯图片消息不等待；等不到新消息就正常回复，私聊必回不受影响。改完下一步私聊立即生效，不用重启。</div>
+    <div style="margin-top:8px">
+      <button onclick="saveDmSettle()">保存私聊等待</button>
+      <span class="hint" id="dmMsg"></span>
+    </div>
+
     <label style="margin-top:12px">判定提示词（必须保留 {message}，可用 {recent} 和 {last_bot}）</label>
     <textarea id="jaPrompt" rows="8" placeholder="加载中…"></textarea>
 
@@ -1410,6 +1436,7 @@ async function loadJudgeApi() {
   document.getElementById('jaUsage').textContent = used.date
     ? ` · 今日判官 ${used.tokens || 0} tokens`
     : '';
+  loadDmSettle();
 }
 
 async function saveJudgeApi() {
@@ -1456,6 +1483,39 @@ async function saveJudgeApi() {
   if (r.ok) {
     document.getElementById('jaKey').value = '';
     loadJudgeApi();
+  }
+}
+
+// 私聊话段等待（独立插件 astrbot_plugin_private_settle，配置在 data/private_settle.json）
+async function loadDmSettle() {
+  try {
+    const d = await (await fetch('/api/dm/settle')).json();
+    document.getElementById('dmEnable').checked = d.enabled !== false;
+    document.getElementById('dmWhitelistOnly').checked = d.whitelist_only !== false;
+    document.getElementById('dmSettle').value = d.settle ?? 3.5;
+    document.getElementById('dmInflight').value = d.inflight_wait ?? 45;
+  } catch (e) {
+    document.getElementById('dmMsg').textContent = '私聊等待配置加载失败，刷新重试';
+    console.error('loadDmSettle', e);
+  }
+}
+
+async function saveDmSettle() {
+  const box = document.getElementById('dmMsg');
+  box.textContent = '保存中…';
+  try {
+    const r = await (await fetch('/api/dm/settle', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        enabled: document.getElementById('dmEnable').checked,
+        whitelist_only: document.getElementById('dmWhitelistOnly').checked,
+        settle: numOr('dmSettle', 3.5),
+        inflight_wait: numOr('dmInflight', 45)
+      })
+    })).json();
+    box.textContent = r.ok ? '已保存，下一条私聊生效' : '失败';
+  } catch (e) {
+    box.textContent = '保存失败：' + e;
   }
 }
 

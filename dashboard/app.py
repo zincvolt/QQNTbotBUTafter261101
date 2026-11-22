@@ -56,6 +56,7 @@ AFFECTION_EDIT_FILE = ROOT / "data" / "affection_edit.json"
 AUTOREPLY_FILE = ROOT / "data" / "autoreply.json"
 REPLY_FILE = ROOT / "data" / "reply.json"
 LTM_FILE = ROOT / "data" / "ltm.json"
+DM_SETTLE_FILE = ROOT / "data" / "private_settle.json"
 PLUGIN_DIR = ROOT / "apps" / "AstrBot" / "data" / "plugins"
 CREATOR_DATA_FILE = PLUGIN_DIR / "astrbot_plugin_creator" / "creator_data.json"
 JUDGE_URL = "http://127.0.0.1:8082/v1/chat/completions"
@@ -2051,6 +2052,56 @@ async def save_judge_api(request: Request) -> JSONResponse:
         return JSONResponse({"ok": False, "msg": "提示词里必须保留占位符 {message}"})
     write_json(JUDGE_API_FILE, data)
     return JSONResponse({"ok": True, "msg": "已保存，下一条群消息生效"})
+
+
+DM_SETTLE_DEFAULTS: dict = {
+    "enabled": True,
+    "settle": 3.5,
+    "poll": 0.2,
+    "inflight_wait": 45.0,
+    "whitelist_only": True,
+    "log": True,
+}
+
+
+def _dm_settle() -> dict:
+    """私聊话段等待的配置，缺字段用默认值补齐。"""
+    raw = read_json(DM_SETTLE_FILE, {})
+    cfg = dict(DM_SETTLE_DEFAULTS)
+    if isinstance(raw, dict):
+        for key in DM_SETTLE_DEFAULTS:
+            if key in raw:
+                cfg[key] = raw[key]
+    return cfg
+
+
+@app.get("/api/dm/settle")
+def get_dm_settle() -> JSONResponse:
+    """Return the private-chat settle settings (panel「判官」页可调)."""
+    return JSONResponse(_dm_settle())
+
+
+@app.post("/api/dm/settle")
+async def save_dm_settle(request: Request) -> JSONResponse:
+    """Merge-save the private-chat settle settings."""
+    body = await request.json()
+    cfg = _dm_settle()
+    for key in ("enabled", "whitelist_only", "log"):
+        if key in body:
+            cfg[key] = bool(body[key])
+    if "settle" in body:
+        try:
+            cfg["settle"] = min(15.0, max(0.0, float(body["settle"])))
+        except (TypeError, ValueError):
+            pass
+    if "inflight_wait" in body:
+        try:
+            cfg["inflight_wait"] = min(120.0, max(0.0, float(body["inflight_wait"])))
+        except (TypeError, ValueError):
+            pass
+    cfg["poll"] = 0.2  # 轮询间隔不开放给面板，固定值够用
+    write_json(DM_SETTLE_FILE, cfg)
+    return JSONResponse({"ok": True, "config": cfg})
 
 
 @app.post("/api/judge/test")
