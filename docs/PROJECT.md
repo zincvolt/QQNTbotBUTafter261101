@@ -236,6 +236,12 @@ PaddleOCR-VL，能抄图上的字 + 一句画面描述。2GB 常驻，不碰 9B�
 **描述存在哪**：`memes_data.json`（不是 manifest）。插件以它为准，
 manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添加描述"。
 
+**meme_manager 的标记模式**（现在私聊/群聊的图主要来自它，不是上面 basicZ 的 30% 概率）：
+模型输出 `&&分类&&` 才发图，每轮把分类表注入 `system_prompt`（实测 817 字符 ≈ 500 token）。
+群聊按 `generation.emotion.probability`（当前 35%）随机放行；私聊单独走
+`data/meme_dm.json` 的 `off / llm / random` 三档，默认 `llm`（交给模型判断）。
+两处本地补丁与理由见 §14 和 [PRIVATE-CHAT.md §4](PRIVATE-CHAT.md)。
+
 ---
 
 ## 9. 群聊行为控制
@@ -288,6 +294,30 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 | `/群统计` | 本群近 7 天活跃 |
 | `/兽聚help` | 帮助 |
 | `/关心 <展会> [HH:MM]` | 管理员设置每日播报 |
+
+---
+
+## 9.6 私聊话段合并（插件 `astrbot_plugin_private_settle`）
+
+群里"一句话拆三条发"靠判官的 `burst_settle` 聚合；私聊必回复、判官链在
+`need_active_reply` 第一行就短路，所以另起一个插件补这层，并且**不是只回最后一条，
+而是把几条合成一条用户消息再回**：
+
+```
+A 到达 → 当 owner，等 settle（默认 3.5s，新消息会顺延）
+B、C 到达 → 文本/图片 append 进这一组，自己 stop_event 不回复
+安静够了 → message_str = "A\nB\nC"，图片接进消息链 → 只请求一次 LLM
+```
+
+- 合并上限 `merge_window`（默认 15s）：一直说个不停到点就发，不丢话；
+- 被合并的消息不进对话历史，只有合并后一条落库；
+- 斜杠指令不参与合并、也不被本插件停掉，指令链路照常走；
+- 回复生成中到达的消息先排队（`inflight_wait`），避免各回一条；
+- 配置 `data/private_settle.json`，面板「判官 → 私聊话段合并」可调。
+
+细节（时序图、与指令/图片/历史的交互、表情策略、验证记录）见
+[PRIVATE-CHAT.md](PRIVATE-CHAT.md)。私聊表情策略在 `data/meme_dm.json`
+（`off` / `llm` / `random`），面板同页可切。
 
 ---
 
@@ -349,7 +379,7 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 | `scripts\restart-astrbot.ps1` | 只重启 AstrBot（不动 QQ，不用扫码） |
 | `apps\AstrBot\data\cmd_config.json` | AstrBot 主配置（provider/白名单/压缩等） |
 | `apps\AstrBot\data\plugins\astrbot_plugin_basicz\` | 人设、闸门、水群、发图、文本处理 |
-| `apps\AstrBot\data\plugins\astrbot_plugin_private_settle\` | 私聊话段等待：连发多条只回最后一条（`on_waiting_llm_request`，priority=maxsize，抢在 basicZ 在途锁之前；不送判官） |
+| `apps\AstrBot\data\plugins\astrbot_plugin_private_settle\` | 私聊话段合并：连发几条合成一条用户消息、只回一次（`on_waiting_llm_request`，priority=maxsize，抢在 basicZ 闸门之前；合并文本写回 `event.message_str`、图片接进消息链；不送判官） |
 | `apps\AstrBot\data\plugins\astrbot_plugin_access\` | 权限闸门：统一斜线指令鉴权（超管/管理/公开三级）、指令权限表在线编辑（/权限）、主动回复冲突仲裁（handler 分档替代 maxsize 力大砖飞）。`unified_perm.py`：统一权限判定模块，apimode/furcon/visionmode 已归并到此（取消各自 ADMINS 名单），meme_manager 走框架 PermissionType.ADMIN 同口径 |
 | `apps\AstrBot\data\plugins\astrbot_plugin_ltm\` | 记忆提取与召回 |
 | `apps\AstrBot\data\plugins\astrbot_plugin_vision_context\` | 群图释义、表情库索引、收集器 |
@@ -407,6 +437,8 @@ SearXNG 不停：它是 Docker 容器（`restart=unless-stopped`），要停请 
 | `builtin_stars\astrbot\main.py` | 主动接话缺会话时自动创建；`on_llm_response` 记录 bot 最近一句给第三方判官 |
 | `builtin_stars\astrbot\main.py` | `GeneratorExit` 不算错误（stop 事件时不再刷红字） |
 | `core\updater.py` | 禁止自动升级（`LOCAL_UPDATES_DISABLED`），保护上面 5 处补丁 |
+| `data\plugins\astrbot_plugin_meme_manager\main.py` | **插件补丁**（升级该插件会覆盖）：2026-11-23 `_apply_request_prompt` 在纯分类标记模式下先定策略——群聊按 `generation.emotion.probability` 掷骰，未命中的轮次直接 strip 表情提示并摘掉表情工具；私聊按 `data/meme_dm.json` 的 `off/llm/random` 走（`off` 不注入，`llm` 预置 `meme_manager_send_probability_hit=True` 把决定权交给模型）。原版每轮无条件注入分类表（12 分类 + 发送格式 + 防泄露说明，实测 817 字 ≈ 500 token），既白烧 token 又让模型倾向每条都配图 |
+| `data\plugins\astrbot_plugin_meme_manager\utils.py`、`mixins\event_handlers.py` | **插件补丁**：`utils.dm_meme_mode()` 按 mtime 读私聊策略；`_inject_meme_prompt_impl` 在注入后给私聊追加一句「默认只回文字，情绪明显且贴切才配 1 张」，避免模型把「可以配图」当义务 |
 
 ---
 

@@ -2056,7 +2056,9 @@ async def save_judge_api(request: Request) -> JSONResponse:
 
 DM_SETTLE_DEFAULTS: dict = {
     "enabled": True,
+    "merge": True,
     "settle": 3.5,
+    "merge_window": 15.0,
     "poll": 0.2,
     "inflight_wait": 45.0,
     "whitelist_only": True,
@@ -2080,18 +2082,22 @@ def get_dm_settle() -> JSONResponse:
     """Return the private-chat settle settings (panel「判官」页可调)."""
     return JSONResponse(_dm_settle())
 
-
 @app.post("/api/dm/settle")
 async def save_dm_settle(request: Request) -> JSONResponse:
     """Merge-save the private-chat settle settings."""
     body = await request.json()
     cfg = _dm_settle()
-    for key in ("enabled", "whitelist_only", "log"):
+    for key in ("enabled", "merge", "whitelist_only", "log"):
         if key in body:
             cfg[key] = bool(body[key])
     if "settle" in body:
         try:
             cfg["settle"] = min(15.0, max(0.0, float(body["settle"])))
+        except (TypeError, ValueError):
+            pass
+    if "merge_window" in body:
+        try:
+            cfg["merge_window"] = min(60.0, max(1.0, float(body["merge_window"])))
         except (TypeError, ValueError):
             pass
     if "inflight_wait" in body:
@@ -2101,6 +2107,37 @@ async def save_dm_settle(request: Request) -> JSONResponse:
             pass
     cfg["poll"] = 0.2  # 轮询间隔不开放给面板，固定值够用
     write_json(DM_SETTLE_FILE, cfg)
+    return JSONResponse({"ok": True, "config": cfg})
+
+
+MEME_DM_FILE = ROOT / "data" / "meme_dm.json"
+MEME_DM_DEFAULTS: dict = {"mode": "llm"}
+MEME_DM_MODES = ("off", "llm", "random")
+
+
+def _dm_meme() -> dict:
+    """私聊表情策略：off / llm / random，缺字段按 llm 补齐。"""
+    raw = read_json(MEME_DM_FILE, {})
+    cfg = dict(MEME_DM_DEFAULTS)
+    if isinstance(raw, dict) and str(raw.get("mode") or "").lower() in MEME_DM_MODES:
+        cfg["mode"] = str(raw["mode"]).lower()
+    return cfg
+
+
+@app.get("/api/dm/meme")
+def get_dm_meme() -> JSONResponse:
+    """Return the private-chat meme policy (panel「判官」页可调)."""
+    return JSONResponse(_dm_meme())
+
+
+@app.post("/api/dm/meme")
+async def save_dm_meme(request: Request) -> JSONResponse:
+    """Save the private-chat meme policy; unknown values fall back to llm."""
+    body = await request.json()
+    cfg = _dm_meme()
+    mode = str(body.get("mode", cfg["mode"])).strip().lower()
+    cfg["mode"] = mode if mode in MEME_DM_MODES else "llm"
+    write_json(MEME_DM_FILE, cfg)
     return JSONResponse({"ok": True, "config": cfg})
 
 

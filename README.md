@@ -36,7 +36,7 @@
 | 插件 | 用途 |
 |---|---|
 | [astrbot-plugin-basicz](https://github.com/zincvolt/astrbot-plugin-basicz) | 群聊基础行为层（原 peer）：人格渲染、发言闸门、注入/刷屏防护、读图闸、热群、表情后处理 |
-| astrbot-plugin-private_settle（本地） | 私聊话段等待：连发多条只回最后一条，补上私聊缺失的判官等待层（不送判官） |
+| astrbot-plugin-private_settle（本地） | 私聊话段合并：连发几条合成一条消息、只回一次，补上私聊缺失的判官等待层（不送判官） |
 | [astrbot-plugin-access](https://github.com/zincvolt/astrbot-plugin-access) | 权限闸门：统一斜线指令鉴权、指令权限表在线编辑、主动回复冲突仲裁（附新插件指令管理/部署双指南） |
 | [astrbot-plugin-ltm](https://github.com/zincvolt/astrbot-plugin-ltm) | 长期记忆：抽取稳定事实、语义召回后注入提示词 |
 | [astrbot-plugin-apimode](https://github.com/zincvolt/astrbot-plugin-apimode) | 本地 / 第三方模型热切换、token 额度、按群审查 |
@@ -119,6 +119,7 @@ stop-all.ps1           一键停止
 4. 改完代码跑 `scripts/verify.ps1` 验证（尤其 AstrBot 升级后查补丁是否还在）
 5. **判官有两套互不干扰的配置**：本地模式用 `data/judge.json` + 8082；第三方模式用 `data/judge_api.json` + API，按主模型 provider 自动切换，细节见 [docs/THIRD-PARTY-API.md](docs/THIRD-PARTY-API.md) §14
 6. **话段聚合与省 token**（一句话别回四遍，也别不理人）：很多人把一句话拆成两三句发，判官会等这一口气说完（`burst_settle`）再判一次；这一段判过/回过后不再送判官（`burst_reuse`），但叫它名字或骂到它头上会按规则破例。回复正在生成/分段发送时开启**在途硬锁**（`inflight_lock`），连 @ 它和唤醒前缀也一并挡掉，发完（`after_message_sent` 真实信号）立刻放开。字段都在 `data/judge_api.json`，控制台「判官 → 话段聚合/在途硬锁」可调，机制见 [docs/THIRD-PARTY-API.md](docs/THIRD-PARTY-API.md) §14.6、兼容性清单见 §14.7
+7. **私聊连发**没有判官兜着（必回复、整条链短路），由独立插件把几条**合并成一条用户消息**再回一次；私聊表情也不再按概率乱发，默认交给模型判断，见 [docs/PRIVATE-CHAT.md](docs/PRIVATE-CHAT.md)
 
 ## 部署提示
 
