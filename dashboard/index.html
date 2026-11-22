@@ -639,6 +639,25 @@
     <textarea id="jaFollowup" rows="3" placeholder="你不是.{0,6}吗"></textarea>
     <div class="hint">默认已内置「你/阿灰/灰灰 + 不是|怎么|为什么|刚才|汪|喵」这类追问；正向命中才生效，别写太宽。</div>
 
+    <label style="margin-top:12px">判官看不懂（回 ?）时怎么办</label>
+    <div class="two">
+      <div>
+        <label>追文最短间隔秒数（0=每条都追）</label>
+        <input id="jaFollowupGap" type="number" min="0" max="3600" step="30">
+      </div>
+      <div style="display:grid;gap:8px">
+        <label style="display:flex;align-items:center;gap:8px;color:var(--text)">
+          <input type="checkbox" id="jaFollowupEnable">
+          看不懂时补更早消息再判一次
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;color:var(--text)">
+          <input type="checkbox" id="jaUnknownAsk">
+          还看不懂就让主模型主动问（默认关）
+        </label>
+      </div>
+    </div>
+    <div class="hint">「主动问」关着时，追文后还看不懂就直接不接——宁可装死，也不在群里反复刷「你们在说啥」。</div>
+
     <label style="margin-top:12px">判定提示词（必须保留 {message}，可用 {recent} 和 {last_bot}）</label>
     <textarea id="jaPrompt" rows="8" placeholder="加载中…"></textarea>
 
@@ -1374,6 +1393,9 @@ async function loadJudgeApi() {
   document.getElementById('jaIgnore').value = (j.ignore || []).join('\n');
   document.getElementById('jaForce').value = (j.force_reply || []).join('\n');
   document.getElementById('jaFollowup').value = (j.followup_patterns || []).join('\n');
+  document.getElementById('jaFollowupEnable').checked = j.followup_enable !== false;
+  document.getElementById('jaFollowupGap').value = j.followup_gap ?? 120;
+  document.getElementById('jaUnknownAsk').checked = j.unknown_reply === 'ask';
   document.getElementById('jaKeyState').textContent = j.api_key_set
     ? '已配置独立密钥（输入新值可替换）'
     : '未配置，当前沿用主模型密钥';
@@ -1409,6 +1431,9 @@ async function saveJudgeApi() {
     ignore: lines('jaIgnore'),
     force_reply: lines('jaForce'),
     followup_patterns: lines('jaFollowup'),
+    followup_enable: document.getElementById('jaFollowupEnable').checked,
+    followup_gap: numOr('jaFollowupGap', 120),
+    unknown_reply: document.getElementById('jaUnknownAsk').checked ? 'ask' : 'silent',
     enable: document.getElementById('jaEnable').checked,
     budget_gate: document.getElementById('jaBudget').checked,
     use_reply_chance: document.getElementById('jaChance').checked,

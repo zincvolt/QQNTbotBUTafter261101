@@ -1987,6 +1987,9 @@ def get_judge_api() -> JSONResponse:
     data.setdefault("break_follow", 30)
     data.setdefault("bot_names", [])
     data.setdefault("break_words", [])
+    data.setdefault("followup_enable", True)
+    data.setdefault("followup_gap", 120)
+    data.setdefault("unknown_reply", "silent")
     return JSONResponse(data)
 
 
@@ -2029,6 +2032,9 @@ async def save_judge_api(request: Request) -> JSONResponse:
         "force_reply",
         "force_patterns",
         "followup_patterns",
+        "followup_enable",
+        "followup_gap",
+        "unknown_reply",
         "summon",
     ):
         if key in body:

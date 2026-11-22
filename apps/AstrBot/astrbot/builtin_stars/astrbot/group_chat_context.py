@@ -502,11 +502,18 @@ def load_judge_api_config() -> dict:
         "break_follow": 30,
         "summon_gap": 4,
         "daily_limit": 50000,
-        "used": {"date": "", "tokens": 0},
+        "group_limits": {},
+        "used": {"date": "", "tokens": 0, "groups": {}},
         "ignore": [],
         "force_reply": [],
         "force_patterns": [],
         "followup_patterns": [],
+        # 判官回「?」（看不懂这段在聊啥）时的收尾。
+        # 以前：追一次文，仍看不懂就放行并提示主模型「直接问『你们在说啥』」，
+        # 群里一天能问好几次，太吵。现在默认追一次、还看不懂就不接（装死）。
+        "followup_enable": True,
+        "followup_gap": 120,        # 同一群两次追文的最小间隔（秒），防止每条都翻倍调用
+        "unknown_reply": "silent",  # silent=不接；ask=旧行为（放行 + 让主模型主动问）
         "summon": [],
     }
     try:
@@ -561,14 +568,29 @@ def load_judge_api_config() -> dict:
         "break_follow": _as_int(raw.get("break_follow"), 30, 0, 300),
         "summon_gap": _as_int(raw.get("summon_gap"), 4, 0, 120),
         "daily_limit": _as_int(raw.get("daily_limit"), 50000, 0, 10_000_000),
+        "group_limits": {
+            str(k): _as_int(v, 0, 0, 10_000_000)
+            for k, v in (raw.get("group_limits") or {}).items()
+        },
         "used": {
             "date": str(used.get("date") or ""),
             "tokens": _as_int(used.get("tokens"), 0, 0, 10_000_000_000),
+            "groups": {
+                str(k): _as_int(v, 0, 0, 10_000_000_000)
+                for k, v in (used.get("groups") or {}).items()
+            },
         },
         "ignore": _words("ignore"),
         "force_reply": _words("force_reply"),
         "force_patterns": _words("force_patterns"),
         "followup_patterns": _words("followup_patterns"),
+        "followup_enable": bool(raw.get("followup_enable", True)),
+        "followup_gap": _as_int(raw.get("followup_gap"), 120, 0, 3600),
+        "unknown_reply": (
+            "ask"
+            if str(raw.get("unknown_reply") or "silent").strip().lower() == "ask"
+            else "silent"
+        ),
         "summon": _words("summon"),
     }
     _judge_api_cache = {"mtime": stat.st_mtime, "data": data}
@@ -715,6 +737,8 @@ class GroupChatContext:
         self._last_bot_span: dict[str, tuple[float, float]] = {}
         self._burst: dict[str, dict] = {}
         self._judge_cache_map: dict[tuple[str, str], tuple[float, bool]] = {}
+        # 追文（判官回「?」时补更早上下文）的冷却：每群上次追文时刻
+        self._followup_at: dict[str, float] = {}
         self._judge_fail = 0
         self._judge_cooldown_until = 0.0
         self._judge_usage = dict(load_judge_api_config()["used"])
@@ -1092,36 +1116,73 @@ class GroupChatContext:
     ) -> bool | None:
         """Judge once; on ``?`` fetch earlier messages and ask once more.
 
-        A second ``?`` means the judge genuinely cannot follow the group. Let
-        the bot reply and mark the event so the main model is told to ask what
-        they are talking about instead of bluffing an answer.
+        ``?`` 表示判官看不懂这段在聊什么。收尾默认是**不接**（``silent``）：
+        追一次文还看不懂，就当这条跟它无关——省一次回复，也免得在群里反复
+        问「你们在说啥」（以前就是这么干的，一天问好几次，很吵）。
+        只有把 ``unknown_reply`` 设成 ``ask`` 才回到旧行为。
+
+        追文本身受 ``followup_gap`` 限制：同一群在这个间隔内只追一次，
+        否则每条看不懂的消息都要多打一次 API，token 翻倍。
+
+        Args:
+            event: Message event (used to flag an ``ask`` follow-up).
+            umo: Unified message origin.
+            message: The new message to judge.
+            records: Recent unjudged records.
+            api_cfg: Judge profile.
+
+        Returns:
+            True to reply, False to stay quiet, ``None`` when the call failed
+            (the caller falls back to probability).
         """
         insult = self._insult_hit(message, api_cfg)
+        gid = str(event.get_group_id() or "")
         verdict = await self._judge_api(
-            umo, message, records, api_cfg, insult=insult
+            umo, message, records, api_cfg, insult=insult, group_id=gid
+        )
+        if verdict != "?":
+            return verdict
+
+        if not api_cfg["followup_enable"]:
+            logger.info(f"group judge | 判官看不懂，追文已关，不接 | {message[:30]}")
+            return False
+        gap = api_cfg["followup_gap"]
+        last = self._followup_at.get(umo, 0.0)
+        if gap and time.time() - last < gap:
+            logger.info(
+                f"group judge | 判官看不懂，{int(gap - (time.time() - last))}s 内追过文，"
+                f"这次不追也不问 | {message[:30]}"
+            )
+            return False
+        self._followup_at[umo] = time.time()
+
+        earlier = self._earlier_context(umo, records, api_cfg)
+        logger.info(
+            f"group judge | 判官要看更早的上下文，追 "
+            f"{len(earlier.splitlines())} 条再判 | {message[:30]}"
+        )
+        verdict = await self._judge_api(
+            umo,
+            message,
+            records,
+            api_cfg,
+            insult=insult,
+            earlier=earlier,
+            skip_cache=True,
+            group_id=gid,
         )
         if verdict == "?":
-            earlier = self._earlier_context(umo, records, api_cfg)
-            logger.info(
-                f"group judge | 判官要看更早的上下文，追 "
-                f"{len(earlier.splitlines())} 条再判 | {message[:30]}"
-            )
-            verdict = await self._judge_api(
-                umo,
-                message,
-                records,
-                api_cfg,
-                insult=insult,
-                earlier=earlier,
-                skip_cache=True,
-            )
-            if verdict == "?":
+            if api_cfg["unknown_reply"] == "ask":
                 logger.info(
                     f"group judge | 追文后仍看不懂，放行让主模型主动问 "
                     f"| {message[:30]}"
                 )
                 event.set_extra("judge_unknown", True)
-                verdict = True
+                return True
+            logger.info(
+                f"group judge | 追文后仍看不懂，不接（免在群里追着问）| {message[:30]}"
+            )
+            return False
         return verdict
 
     def _earlier_context(self, umo: str, records: list, api_cfg: dict) -> str:
@@ -1152,6 +1213,7 @@ class GroupChatContext:
         insult: bool = False,
         earlier: str = "",
         skip_cache: bool = False,
+        group_id: str = "",
     ) -> bool | str | None:
         """Ask the third-party judge model with a minimal prompt.
 
@@ -1184,14 +1246,26 @@ class GroupChatContext:
         today = datetime.datetime.now().strftime("%Y%m%d")
         used = dict(self._judge_usage)
         if used.get("date") != today:
-            used = {"date": today, "tokens": 0}
+            used = {"date": today, "tokens": 0, "groups": {}}
             self._judge_usage = used
-        limit = api_cfg["daily_limit"]
+        # 全局额度硬上限
+        limit = int(api_cfg["daily_limit"] or 0)
         if limit and int(used.get("tokens") or 0) >= limit:
             logger.warning(
-                f"group judge | API 判官日限额已满({used['tokens']})，走概率兜底"
+                f"group judge | API 判官全局日限额已满({used['tokens']})，走概率兜底"
             )
             return None
+        # 本群额度（0 = 跟随全局，全局上限已判过）
+        gid = str(group_id or "")
+        glimits = api_cfg.get("group_limits") or {}
+        glimit = int(glimits.get(gid) or 0) if gid else 0
+        if glimit:
+            gused = int((used.get("groups") or {}).get(gid) or 0)
+            if gused >= glimit:
+                logger.warning(
+                    f"group judge | API 判官本群({gid})额度已满({gused}/{glimit})，走概率兜底"
+                )
+                return None
 
         base, api_key, model = self._judge_api_credentials(api_cfg)
         if not api_key:
@@ -1252,7 +1326,7 @@ class GroupChatContext:
                 resp.raise_for_status()
                 data = resp.json()
             usage = data.get("usage") or {}
-            self._judge_usage_add(int(usage.get("total_tokens") or 0))
+            self._judge_usage_add(int(usage.get("total_tokens") or 0), group_id)
             content = (data["choices"][0]["message"].get("content") or "").strip()
             verdict = _parse_verdict(content)
             self._judge_fail = 0
@@ -1309,15 +1383,20 @@ class GroupChatContext:
             base = str(source.get("api_base") or "https://api.deepseek.com/v1").rstrip("/")
         return base, api_key, model
 
-    def _judge_usage_add(self, tokens: int) -> None:
-        """Accumulate judge tokens into its own daily counter."""
+    def _judge_usage_add(self, tokens: int, group_id: str = "") -> None:
+        """Accumulate judge tokens into global and per-group daily counters."""
         if tokens <= 0:
             return
         today = datetime.datetime.now().strftime("%Y%m%d")
         used = dict(self._judge_usage)
         if used.get("date") != today:
-            used = {"date": today, "tokens": 0}
+            used = {"date": today, "tokens": 0, "groups": {}}
         used["tokens"] = int(used.get("tokens") or 0) + tokens
+        gid = str(group_id or "")
+        if gid:
+            groups = dict(used.get("groups") or {})
+            groups[gid] = int(groups.get(gid) or 0) + tokens
+            used["groups"] = groups
         self._judge_usage = used
         self._judge_usage_dirty = True
         if time.time() - self._judge_last_flush > 60:
@@ -1766,9 +1845,10 @@ class GroupChatContext:
 
     async def on_req_llm(self, event: AstrMessageEvent, req: ProviderRequest) -> None:
         umo = event.unified_msg_origin
-        # 判官追文一次后仍回「?」：它看不懂这段对话，但这条消息被判为要接。
-        # 给主模型一句提示——需要上下文就直接问，别装懂硬答。同一事件在
-        # 工具循环里会多次进这个钩子，用 extra 标记保证只注入一次。
+        # 判官追文一次后仍回「?」：只有 unknown_reply=ask（旧行为，默认关）才会
+        # 走到这里——放行让主模型主动问「你们在说啥」。默认 silent 时判官直接
+        # 判不接，这段不会执行。同一事件在工具循环里会多次进这个钩子，
+        # 用 extra 标记保证只注入一次。
         if (
             event.get_extra("judge_unknown")
             and not event.get_extra("_judge_unknown_hinted")
