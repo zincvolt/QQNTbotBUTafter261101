@@ -471,6 +471,7 @@ LTM_DEFAULTS = {
     "extract_cooldown": 45,
     "max_tokens": 500,
     "third_party_scan": True,
+    "purge_enabled": True,
 }
 
 
@@ -479,7 +480,7 @@ def read_ltm_settings() -> dict:
 
     Returns:
         Dict with enabled / scan_interval / scan_budget / user_cooldown /
-        extract_cooldown / max_tokens / third_party_scan.
+        extract_cooldown / max_tokens / third_party_scan / purge_enabled.
     """
     data = read_json(LTM_FILE, {})
     out = dict(LTM_DEFAULTS)
@@ -521,7 +522,7 @@ async def save_ltm_settings(request: Request) -> JSONResponse:
         except (TypeError, ValueError):
             return JSONResponse({"ok": False, "msg": f"{key} 不是数字"})
         current[key] = max(low, min(high, value))
-    for key in ("enabled", "third_party_scan"):
+    for key in ("enabled", "third_party_scan", "purge_enabled"):
         if key in body:
             current[key] = bool(body[key])
     write_json(LTM_FILE, current)

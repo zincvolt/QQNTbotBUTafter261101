@@ -734,6 +734,13 @@
       </label>
     </div>
     <div style="margin-top:14px">
+      <label style="display:flex;align-items:center;gap:10px;color:var(--text)">
+        <input type="checkbox" id="ltmPurgeExpired">
+        自动删除已过期的记忆（每日清理时物理删除，删前归档到 data\ltm_purged.jsonl）
+      </label>
+      <div class="hint">关掉只打「过期」标记、不删行；<code>/记忆 清理</code> 手动触发时也遵守这个开关。</div>
+    </div>
+    <div style="margin-top:14px">
       <button class="primary" onclick="saveLtmSettings()">保存抽取节奏</button>
       <span class="hint" id="ltmSettingsMsg"></span>
     </div>
@@ -1581,6 +1588,7 @@ async function loadLtmSettings() {
     document.getElementById('ltmExtractCooldown').value = r.extract_cooldown;
     document.getElementById('ltmMaxTokens').value = r.max_tokens;
     document.getElementById('ltmThirdScan').checked = !!r.third_party_scan;
+    document.getElementById('ltmPurgeExpired').checked = r.purge_enabled !== false;
   } catch (e) { console.error('loadLtmSettings', e); }
 }
 
@@ -1595,7 +1603,8 @@ async function saveLtmSettings() {
       user_cooldown: Number(document.getElementById('ltmUserCooldown').value) || 0,
       extract_cooldown: Number(document.getElementById('ltmExtractCooldown').value) || 0,
       max_tokens: Number(document.getElementById('ltmMaxTokens').value) || 500,
-      third_party_scan: document.getElementById('ltmThirdScan').checked
+      third_party_scan: document.getElementById('ltmThirdScan').checked,
+      purge_enabled: document.getElementById('ltmPurgeExpired').checked
     })
   })).json();
   document.getElementById('ltmSettingsMsg').textContent = r.msg || (r.ok ? '已保存' : '失败');
