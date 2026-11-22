@@ -101,7 +101,7 @@ stop-all.ps1           一键停止
 | Python 虚拟环境 | `apps/AstrBot/.venv/` | ~419MB | 用 `requirements.txt` / `pyproject.toml` 重新 `pip install` |
 | Node 依赖 | `apps/NapCat/node_modules/` | ~113MB | `pnpm install` |
 | 前端构建产物 | `apps/AstrBot/data/dist/` | — | 从 AstrBot 发行版获取或重新构建 |
-| 模型服务 | 独立目录 `D:\LLM`（不在本项目内） | — | 本项目只**调用**不修改它；模型服务（9B / 判官 1.7B / OCR / 本地VL / 向量）需单独部署，端口见 `docs/PROJECT.md` |
+| 模型服务 | 独立目录 `D:\LLM`（不在本项目内） | — | 本项目只**调用**不修改它；模型服务（9B / 判官 1.7B / OCR / 本地VL / 向量 / 语音识别 Whisper 8096）需单独部署，SearXNG 跑在 Docker（9000），端口见 `docs/PROJECT.md`。`start-all.ps1` 会拉起前两类 |
 
 **完整可运行的快照**仅保存在原作者的本机，本仓库只提供思路喵，不是开箱即用。
 

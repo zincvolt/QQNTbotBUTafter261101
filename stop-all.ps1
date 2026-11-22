@@ -2,7 +2,7 @@
 #
 #   powershell -ExecutionPolicy Bypass -File stop-all.ps1
 #   powershell -ExecutionPolicy Bypass -File stop-all.ps1 -KeepQQ      # keep QQ + NapCat
-#   powershell -ExecutionPolicy Bypass -File stop-all.ps1 -KeepModels  # keep 8080/8083/8085/8097
+#   powershell -ExecutionPolicy Bypass -File stop-all.ps1 -KeepModels  # keep 8080/8083/8085/8096/8097
 #
 # Everything is located by the port it listens on. Command-line matching is not
 # used any more: AstrBot is started by uv and only shows "python.exe main.py", so
@@ -52,6 +52,17 @@ foreach ($svc in @(@{ Port = 8084; Label = 'caption' }, @{ Port = 8082; Label = 
     else { Write-Host ("      {0} not running" -f $svc.Label) }
 }
 
+Write-Host '=== stt (8096) ==='
+if ($KeepModels) {
+    Write-Host '      kept'
+} elseif (Test-Port 8096) {
+    Stop-Port 8096 'stt' | Out-Null
+} else {
+    Write-Host '      not running'
+}
+# searxng 留在 Docker 里不停：容器是 restart=unless-stopped，停掉会影响同机
+# 其他用 9000 的客户端；要停就 docker stop searxng。
+
 if ($KeepModels) {
     Write-Host '=== local models: kept ==='
 } else {
@@ -94,7 +105,8 @@ Start-Sleep -Seconds 1
 Write-Host '=== result ==='
 $ports = @(@{ Port = 8080; Label = 'chat model' }, @{ Port = 8082; Label = 'judge' },
     @{ Port = 8083; Label = 'ocr' }, @{ Port = 8084; Label = 'caption cache' },
-    @{ Port = 8085; Label = 'local VL' }, @{ Port = 8097; Label = 'embedding' },
+    @{ Port = 8085; Label = 'local VL' }, @{ Port = 8096; Label = 'stt' },
+    @{ Port = 8097; Label = 'embedding' },
     @{ Port = 6185; Label = 'astrbot' }, @{ Port = 6190; Label = 'dashboard' },
     @{ Port = 6191; Label = 'qr page' }, @{ Port = 6099; Label = 'napcat (kept)' })
 Show-Status $ports
@@ -102,7 +114,7 @@ Show-Status $ports
 # Only ports we actually asked to stop count as failures.
 $mustBeDown = @($ports | Where-Object {
         if ($KeepQQ -and $_.Port -eq 6099) { return $false }
-        if ($KeepModels -and ($_.Port -in @(8080, 8083, 8085, 8097))) { return $false }
+        if ($KeepModels -and ($_.Port -in @(8080, 8083, 8085, 8096, 8097))) { return $false }
         return $true
     })
 $still = @($mustBeDown | Where-Object { Test-Port $_.Port })

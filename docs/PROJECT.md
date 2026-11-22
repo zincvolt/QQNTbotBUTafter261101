@@ -34,7 +34,8 @@ QQNT 9.9.25（替换过 QQ.exe + dbghelp.dll 绕过文件校验）
                  ├─ 读图     → 8083  PaddleOCR-VL-1.6（常驻）
                  │    └─ 缓存代理 → 8084（哈希去重）
                  ├─ 向量     → 8097  bge-small-zh（NPU）
-                 ├─ 联网     → 9000  SearXNG
+                 ├─ 语音     → 8096  Whisper small int8（NPU）
+                 ├─ 联网     → 9000  SearXNG（Docker）
                  ├─ 记忆     → data\memory.db（SQLite）
                  └─ 控制台   → 6190  本项目 dashboard
 ```
@@ -53,7 +54,8 @@ QQNT 9.9.25（替换过 QQ.exe + dbghelp.dll 绕过文件校验）
 | 8083 | OCR PaddleOCR-VL | ~2 GB | 0.13s（热）/ 1.2s（冷） |
 | 8084 | 图片缓存代理 | ~60 MB | 0.009s（命中） |
 | 8097 | 向量服务 | ~0.5 GB | 20ms |
-| 9000 | SearXNG | ~150 MB | 1~2s |
+| 8096 | 语音识别 Whisper（NPU） | ~0.6 GB | 0.3s（6.6s 语音） |
+| 9000 | SearXNG（Docker） | ~150 MB | 1~2s |
 | 6185 | AstrBot 面板 | 随 AstrBot | `astrbot` / `qqbot2026` |
 | 6190 | 控制台 | ~80 MB | — |
 | 6199 | OneBot WS | 随 AstrBot | — |
@@ -356,15 +358,17 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 ## 12. 运维
 
 **启动**：双击桌面「启动QQ机器人」（= `start-all.ps1`）
-自动完成：版本守卫 → 读模式 → （本地模型）→ 判官/嵌入/释义缓存 → AstrBot → QQ/NapCat → 控制台，
-需要扫码时会自动弹出二维码窗口。
+自动完成：版本守卫 → 读模式 → （本地模型）→ 判官/嵌入/释义缓存 → AstrBot → QQ/NapCat → 控制台
+→ 语音识别（8096）+ SearXNG（9000，按需 `docker start`），需要扫码时会自动弹出二维码窗口。
 
 读 `agent_runner.config.model.provider_id` 决定是否起 8080/8083/8085：**第三方模式跳过，省约 14 GB**。
+判官/嵌入/释义缓存/语音识别/SearXNG **两种模式都会起**——缺了它们语音消息会转写失败、联网搜索会哑掉。
 服务默认用 WMI 分离启动（父进程 `WmiPrvSE.exe`），关掉 PowerShell 窗口不会带走机器人。
 
 参数：`-ThirdParty` 强制跳过本地模型 / `-Local` 强制启动 / `-NoBrowser` 不开页面 / `-NoDetach` 挂在本窗口。
 
-**停**：`stop-all.ps1`（按端口杀进程），`-KeepQQ` 保留 QQ、`-KeepModels` 保留本地模型。
+**停**：`stop-all.ps1`（按端口杀进程），`-KeepQQ` 保留 QQ、`-KeepModels` 保留本地模型（含语音识别）。
+SearXNG 不停：它是 Docker 容器（`restart=unless-stopped`），要停请 `docker stop searxng`。
 返回码 0 = 全部按预期停止；1 = 有端口没释放（权限不够，或被别的东西又拉起来了）。
 
 **只重启 AstrBot**：`scripts\restart-astrbot.ps1`（10 秒，QQ 不断线；按 6185 端口定位进程）
@@ -373,6 +377,7 @@ manifest 从它同步。**改分类不会丢描述**，新分类才会是"请添
 - AstrBot：`apps\AstrBot\data\logs\astrbot.log`
 - NapCat：`apps\NapCat\logs\`
 - 路由：`D:\LLM\logs\`
+- 语音识别：`D:\LLM\logs\stt-npu.out` / `stt-npu.err`
 - 判官/OCR：`_backup\judge.err` / `ocr.err`
 
 ---
