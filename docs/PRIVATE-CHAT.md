@@ -170,7 +170,7 @@ LLM 请求串行化。如果不排队，B、C 都可能在 A 生成期间过钩�
 
 ## 6. 验证记录（2026-11-23）
 
-隔离测试（`_tmp_verify_dm_merge.py`、`_tmp_check_cmd.py`、`_tmp_check_meme.py`）：
+隔离测试（一次性脚本，未入库；`astrbot-plugin-private-settle` 仓库的 README 记了同样的结论）：
 
 | 场景 | 结果 |
 |---|---|
