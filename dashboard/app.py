@@ -1260,23 +1260,36 @@ async def save_profile(request: Request) -> JSONResponse:
 
 @app.get("/api/ltm/prompt")
 def get_ltm_prompt() -> JSONResponse:
-    """Return the memory extraction prompt."""
+    """Return the memory extraction prompt.
+
+    占位符口径以 astrbot_plugin_ltm.load_prompt() 为准：{lines} 必需，
+    {known} 可选（缺失时插件降级为"不显示已知事实"，不会失败）。
+    早期这里误用 {user}/{bot} 校验，导致面板保存的自定义提示词被插件静默回落到内置。
+    """
     try:
         text = LTM_PROMPT.read_text(encoding="utf-8")
     except OSError:
         text = ""
-    return JSONResponse({"text": text, "has_placeholders": "{user}" in text and "{bot}" in text})
+    return JSONResponse({
+        "text": text,
+        "has_placeholders": "{lines}" in text,
+        "has_lines": "{lines}" in text,
+        "has_known": "{known}" in text,
+    })
 
 
 @app.post("/api/ltm/prompt")
 async def save_ltm_prompt(request: Request) -> JSONResponse:
-    """Save the memory extraction prompt (requires {user} and {bot})."""
+    """Save the memory extraction prompt (requires {lines}; {known} optional)."""
     body = await request.json()
     text = str(body.get("text", ""))
-    if "{user}" not in text or "{bot}" not in text:
-        return JSONResponse({"ok": False, "msg": "必须同时包含 {user} 和 {bot} 占位符"})
+    if "{lines}" not in text:
+        return JSONResponse({"ok": False, "msg": "必须包含 {lines} 占位符（消息列表插入点）"})
     LTM_PROMPT.write_text(text, encoding="utf-8")
-    return JSONResponse({"ok": True, "msg": "已保存，下一轮提取生效"})
+    msg = "已保存，下一轮提取生效"
+    if "{known}" not in text:
+        msg += "；提示：未包含 {known}，已知事实不会注入（功能正常，但质量可能下降）"
+    return JSONResponse({"ok": True, "msg": msg})
 
 
 @app.get("/api/guard")

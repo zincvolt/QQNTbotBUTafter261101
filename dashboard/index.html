@@ -749,7 +749,7 @@
 
   <div class="panel">
     <h2>记忆提取提示词 <span class="meta">写入 data\ltm_prompt.txt</span></h2>
-    <label>必须保留 {lines} 占位符（老模板的 {candidates} 也认）</label>
+    <label>必须保留 {lines} 占位符（消息列表插入点）；可选 {known}（已知事实摘要，缺省则不注入）</label>
     <textarea id="ltmPrompt" rows="12" style="font-family:monospace"></textarea>
     <div style="margin-top:12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button class="primary" onclick="saveLtmPrompt()">保存提示词</button>
@@ -1673,7 +1673,9 @@ async function loadLtmPrompt() {
     const r = await (await fetch('/api/ltm/prompt?t=' + Date.now())).json();
     document.getElementById('ltmPrompt').value = r.text || '';
     if (!r.has_placeholders) {
-      document.getElementById('ltmPromptMsg').textContent = '警告：缺少占位符，提取会失败';
+      document.getElementById('ltmPromptMsg').textContent = '警告：缺少 {lines} 占位符，插件会回落到内置提示词';
+    } else if (!r.has_known) {
+      document.getElementById('ltmPromptMsg').textContent = '提示：未包含 {known}，已知事实不会注入';
     }
   } catch (e) { console.error('loadLtmPrompt', e); }
 }

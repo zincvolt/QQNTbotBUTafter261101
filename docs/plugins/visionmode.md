@@ -19,7 +19,7 @@
 
 - **事件字段**：`message_str`、`message_obj.raw_message`（dict 取 `raw_message` 判斜杠，147-157）、`get_sender_id()` / `role`（36 行降级鉴权用）。
 - **`event.get_extra` 键**：无。
-- **读的配置文件**：`data/vision_mode.json`（`load_vision_state`，47-62），键 `mode` / `port` / `model`，缺省 `local` / 8085 / `Qwen3VL-2B-Instruct`；`utf-8` 读。
+- **读的配置文件**：`data/vision_mode.json`（`load_vision_state`，47-62），键 `mode` / `port` / `model`，缺省 `local` / 8085 / `Qwen3VL-4B-Instruct`（2026-11-23 由 2B 修正，与 VISION.md 和实际配置一致）；`utf-8` 读。
 - **外部 HTTP（本地端口）**：`GET http://127.0.0.1:<port>/v1/models`，timeout=3，200 即在线（`local_vl_ready`，71-84）。注意：**本文件未使用** `http://127.0.0.1:<port>/v1/chat/completions`——`caption_image()`（87-134）定义了但 `handle` 没调用，全仓也未见外部 import，实际消费者**待确认**。
 - **其他插件直接调用**：`from unified_perm import is_admin`（28-36，来自 astrbot_plugin_access；ImportError 时降级 `{1154487120}` + `role=="admin"`）。`load_vision_state` / `save_vision_state` / `local_vl_ready` / `caption_image` 为模块级函数，外部引用**待确认**。
 
@@ -56,7 +56,7 @@
 - `ALL` 事件钩子对每个消息都跑，但先判空、再判 `/` 或 `／`、再判 body 以「读图」开头（147-159），非目标消息零副作用返回。
 - 状态查询和切换成功都各探一次 8085（170,193）；`local` 模式且离线时切换回执追加「本地 VL 当前离线」（194-196）。
 - 别名映射：`第三方|api|deepseek → third_party`；`关|off|关闭 → off`；`本地|local → local`；空或 `状态` → 只查询不写（167-190）。
-- 默认 model 写死 `Qwen3VL-2B-Instruct`（58,62），但 VISION.md:3,273 标的是 `Qwen3VL-4B-Instruct`——**文档与代码默认值不一致，待确认**以哪个为准；实际识图端点由 vision_context 的 `CAPTION_ENDPOINTS` 指定 4B（vision_context/main.py:132）。
+- 默认 model 原写死 `Qwen3VL-2B-Instruct`（58,62），与 VISION.md:3,273 的 4B 不一致；**2026-11-23 已修正为 `Qwen3VL-4B-Instruct`**（docstring、setdefault、return 三处），与实际配置 `data/vision_mode.json` 和 vision_context 的 `CAPTION_ENDPOINTS`（4B，vision_context/main.py:132）一致。已存在的 `vision_mode.json` 若写着 2B 不会被覆盖（setdefault 只在缺键时生效），需人工改。
 - 编码：本插件读合同 `utf-8`（55,68），vision_context 读侧用 `utf-8-sig`（vision_context/main.py:349）；若外部写入带 BOM 本插件会 json 解析失败并回退默认值。
 - `caption_image`（87-134）用 `Bearer sk-vl-local`、`max_tokens=160`、`temperature=0.2`、timeout=60，失败返回 `None`；它不在本插件调用链上，消费者待确认。
 

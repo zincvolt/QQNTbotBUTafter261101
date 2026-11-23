@@ -24,7 +24,7 @@
 
 ## 4. 输出（它给别人什么）
 
-- **`event.set_extra` 键与值**：向 `handlers_parsed_params` 字典写入 `__access_cmd__ = {"cmd": cmd}`（仅当该 extra 已存在且为空 dict，main.py:582-586）。下游消费者：**待确认**——全仓 grep 只见写入方；框架读该 extra 的 `builtin_stars/astrbot/main.py:214` 与 `group_chat_context.py:1882` 只读字典真假，不读 `__access_cmd__` 子键。
+- **`event.set_extra` 键与值**：向框架私有的 `handlers_parsed_params` 字典写入 `__access_cmd__ = {"cmd": cmd}`（仅当该 extra 已存在且为空 dict，main.py:582-586）。**真实作用是让空 dict 变成非空**——框架 `builtin_stars/astrbot/main.py:214`（决定是否记入群上下文）与判官 `group_chat_context.py:1882`（inflight 硬锁判断"是不是指令"）都用 `bool(get_extra("handlers_parsed_params"))` 只读真假，不读 `__access_cmd__` 子键。所以这是**内部指令信号、不面向用户/面板**：键值本身无消费者，但"写没写"会影响这两处行为。
 - **改写 req.system_prompt / req.prompt / 工具列表**：无。
 - **`stop_event`**：热群关键词被拦、自有指令处理完、权限不足三种（main.py:539,574,591）。
 - **发消息**：`event.send` 发图卡或纯文字兜底（main.py:222-231）；图卡由 `card_render.render_text_card` 写到 `D:\QQNTBOT\data\access_cards`（card_render.py:62,65-88），绘卡失败静默降级为文字。
@@ -60,7 +60,7 @@
 - gate 异常一律 pass-through（main.py:592-593）；`_save_perm`/`save_group_flag` 写失败只打 error（main.py:388-389,203-204）——可能出现"提示改了但没落盘"。
 - 自有指令必须 `event.send` 而非 yield：yield 通道会被 peer 的 decorate_result 判为「空回复」清空并 stop_event（main.py:553-555）。
 - 旧键 `reply_at/proactive` 读取时映射到 `auto_chat/warmup`，落盘只写新键（main.py:142-157,187-204）；外部直接写旧键要确认消费方都走映射。
-- `__access_cmd__` 写入条件苛刻（仅 extra 为空 dict 时生效）且全仓无读取方，不要把它当稳定跨插件契约。
+- `__access_cmd__` 写入条件苛刻（仅 extra 为空 dict 时生效），键名/值不可当跨插件契约；但不要删掉这次写入——它让 `handlers_parsed_params` 非空，框架与判官据此识别"这是指令、别记进聊天上下文 / 别被在途锁挡"。这是框架内部信号，无需面向用户或面板暴露。
 - AstrBot 升级会覆盖 core 补丁（PROJECT.md:434-445），分档依赖的框架结构需重验。
 
 ## 8. 代码依据

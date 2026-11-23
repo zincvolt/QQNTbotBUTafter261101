@@ -79,7 +79,7 @@
 
 ## 7. 顺序、坑与边界
 - 优先级：ltm 三个钩子都是默认 0；meme_manager `99999`、private_settle 打标 `maxsize-500` 都在它前面，但 ltm 只**追加** system_prompt，不依赖顺序。
-- **提示词占位符不一致**：插件 `load_prompt()` 要 `{lines}`/`{known}`（`main.py:396,843`），面板 `POST /api/ltm/prompt` 却校验 `{user}`/`{bot}`（`dashboard/app.py:1273-1276`）——面板能存进去的模板可能因缺 `{lines}` 被插件回落内置，改完要核对实际行为。
+- **提示词占位符（已对齐）**：插件 `load_prompt()` 要 `{lines}`（必需）/`{known}`（可选，缺失降级为不注入已知事实）（`main.py:396,843`）。面板 `GET/POST /api/ltm/prompt` 已于 2026-11-23 改为同一口径：校验 `{lines}` 必需、缺 `{known}` 给提示不拦截（`dashboard/app.py`）；面板 UI 文案同步去掉了错误的「{candidates} 也认」。旧版本曾误校验 `{user}`/`{bot}`，若发现自定义提示词没生效，先确认是从旧版面板存的。
 - BOM/乱码：配置一律 `utf-8-sig`；抽取提示词读 `utf-8` 且 `_looks_mojibake`/`_demojibake` 自动还原（`main.py:323-353,399-406`）；写回仍是 `utf-8`。
 - 静默失败：文件坏 → 默认值 + WARN；embedding 不可用 → 最近记忆兜底；LLM 异常/空回复 → 跳过本轮；归档写失败只 WARN 不阻断清理。
 - 过期语义：`superseded_by = -1` = 过期软删，`>0` = 合并指向新行；`_purge_expired` 先归档再物理删，并清掉指向已删行的悬空合并行（`main.py:1171-1213`）。
