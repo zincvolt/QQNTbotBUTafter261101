@@ -2057,8 +2057,9 @@ async def save_judge_api(request: Request) -> JSONResponse:
 DM_SETTLE_DEFAULTS: dict = {
     "enabled": True,
     "merge": True,
-    "settle": 3.5,
-    "merge_window": 15.0,
+    "settle": 5.0,
+    "merge_window": 20.0,
+    "min_gap": 10.0,
     "poll": 0.2,
     "inflight_wait": 45.0,
     "whitelist_only": True,
@@ -2098,6 +2099,11 @@ async def save_dm_settle(request: Request) -> JSONResponse:
     if "merge_window" in body:
         try:
             cfg["merge_window"] = min(60.0, max(1.0, float(body["merge_window"])))
+        except (TypeError, ValueError):
+            pass
+    if "min_gap" in body:
+        try:
+            cfg["min_gap"] = min(60.0, max(0.0, float(body["min_gap"])))
         except (TypeError, ValueError):
             pass
     if "inflight_wait" in body:

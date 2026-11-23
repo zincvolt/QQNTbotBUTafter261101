@@ -375,7 +375,7 @@ handler 优先级（闸门 > 指令 > 纯监听），替代各插件的 maxsize 
 | 插件 | 它做什么 | 在哪配 |
 |---|---|---|
 | `astrbot_plugin_basicz` | 人格注入、判官闸门、@ 队列、表情附带、输出后处理 | `data\reply.json`、`main.py` |
-| `astrbot_plugin_private_settle` | 私聊话段合并：连发几条合成一条用户消息、只回一次（图片接进同一消息链；`merge=false` 退回「只回最后一条」；不送判官、0 token） | `data\private_settle.json`，面板「判官 → 私聊话段合并」；私聊表情策略在 `data\meme_dm.json`（同页可切 off/llm/random） |
+| `astrbot_plugin_private_settle` | 私聊话段合并：连发几条合成一条用户消息、只回一次（图片接进同一消息链；`min_gap` 控制两次回复最小间隔；`merge=false` 退回「只回最后一条」；不送判官、0 token） | `data\private_settle.json`，面板「判官 → 私聊话段合并」；私聊表情策略在 `data\meme_dm.json`（同页可切 off/llm/random） |
 | `astrbot_plugin_vision_context` | 图片 OCR/描述缓存、表情包入库、图上下文（群按群号、私聊按 `u<QQ>` 分 session；私聊与 `/私聊` 白名单同口径） | 自动 |
 | `builtin_commands` | 上面第 2 节 | — |
 

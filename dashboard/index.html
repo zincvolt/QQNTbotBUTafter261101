@@ -684,11 +684,15 @@
     </div>
     <div class="two" style="margin-top:6px">
       <div>
+        <label>最短回复间隔：两次回复之间至少隔几秒（0 = 不限）</label>
+        <input id="dmMinGap" type="number" min="0" max="60" step="1">
+      </div>
+      <div>
         <label>上一条还在生成时最多排队秒数</label>
         <input id="dmInflight" type="number" min="0" max="120" step="5">
       </div>
     </div>
-    <div class="hint">指令（/ 开头）和纯文件/语音不等待；连发期间带的图片会接到合并后的消息链里，识图照样生效。被合并的那几条不进对话历史，只有合并后的一条落库。改完下一条私聊立即生效，不用重启。</div>
+    <div class="hint">「最短回复间隔」是治「每句都回」的关键：刚回完就来的话不会立刻再开一轮，而是继续攒着，等间隔够了把它们合成一批一起回（超过「最长等候」则一定放行）。指令（/ 开头）不等待；连发期间带的图片会接到合并后的消息链里，识图照样生效。被合并的那几条不进对话历史，只有合并后的一条落库。改完下一条私聊立即生效。</div>
     <div style="margin-top:8px">
       <button onclick="saveDmSettle()">保存私聊等待</button>
       <span class="hint" id="dmMsg"></span>
@@ -1517,8 +1521,9 @@ async function loadDmSettle() {
     document.getElementById('dmEnable').checked = d.enabled !== false;
     document.getElementById('dmMerge').checked = d.merge !== false;
     document.getElementById('dmWhitelistOnly').checked = d.whitelist_only !== false;
-    document.getElementById('dmSettle').value = d.settle ?? 3.5;
-    document.getElementById('dmMergeWindow').value = d.merge_window ?? 15;
+    document.getElementById('dmSettle').value = d.settle ?? 5;
+    document.getElementById('dmMergeWindow').value = d.merge_window ?? 20;
+    document.getElementById('dmMinGap').value = d.min_gap ?? 10;
     document.getElementById('dmInflight').value = d.inflight_wait ?? 45;
     const m = await (await fetch('/api/dm/meme')).json();
     document.getElementById('dmMemeMode').value = m.mode || 'llm';
@@ -1552,8 +1557,9 @@ async function saveDmSettle() {
         enabled: document.getElementById('dmEnable').checked,
         merge: document.getElementById('dmMerge').checked,
         whitelist_only: document.getElementById('dmWhitelistOnly').checked,
-        settle: numOr('dmSettle', 3.5),
-        merge_window: numOr('dmMergeWindow', 15),
+        settle: numOr('dmSettle', 5),
+        merge_window: numOr('dmMergeWindow', 20),
+        min_gap: numOr('dmMinGap', 10),
         inflight_wait: numOr('dmInflight', 45)
       })
     })).json();
