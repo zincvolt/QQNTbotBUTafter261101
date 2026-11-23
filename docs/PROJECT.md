@@ -388,6 +388,8 @@ B、C 到达 → 文本/图片 append 进这一组，自己 stop_event 不回复
 | `apps\AstrBot\data\plugins\astrbot_plugin_ltm\` | 记忆提取与召回 |
 | `apps\AstrBot\data\plugins\astrbot_plugin_vision_context\` | 群图释义、表情库索引、收集器 |
 
+**每个插件注册了哪些钩子、往外交什么数据、和谁耦合** → 见 [docs/plugins/](plugins/)（自写 12 个逐份接口文档 + 官方/内置插件登记 + 跨插件契约速查表）。
+
 ---
 
 ## 12. 运维
